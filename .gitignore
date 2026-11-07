@@ -1,0 +1,13 @@
+/target/
+# Real configuration and credentials never go into the repository;
+# only example files (*.example.json) are versioned.
+config*.json
+account*.json
+absender*.json
+aussendung*.json
+*.local.json
+!*.example.json
+# Run state, delivery logs, previews
+/state/
+/out/
+*.eml
