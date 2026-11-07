@@ -21,3 +21,7 @@ It is meant for formal notices to members of an association
 Settings come from one or more JSON config files, environment
 variables prefixed `MASSMAILER_`, and command-line options
 (options override environment, environment overrides config).
+
+## License
+
+Licensed under the Apache License, Version 2.0 ([LICENSE](LICENSE)).
