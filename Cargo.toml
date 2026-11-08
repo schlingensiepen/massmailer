@@ -1,0 +1,12 @@
+[package]
+name = "massmailer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+comrak = { version = "0.59.0", default-features = false }
+css-inline = { version = "0.23.1", default-features = false, features = ["stylesheet-cache"] }
+csv = "1.4.0"
+lettre = { version = "0.11.23", default-features = false, features = ["builder"] }
+minijinja = "3.1.0"
