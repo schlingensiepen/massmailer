@@ -48,6 +48,25 @@ complaints, deliveries) and, if enabled there, its dedicated IP pool
 or custom tracking settings. Without the header, only the account-level
 notifications fire.
 
+## Open and click tracking: keep it off
+
+If the configuration set has an event destination with **Opens** or
+**Clicks** enabled, SES changes every mail on the way out: it appends an
+invisible tracking image (`https://….awstrack.me/I0/…`) to the HTML
+part and rewrites every link to go through `….awstrack.me/L0/…`.
+Consequences seen in practice: Outlook on the web and other clients
+that block external images show "pictures blocked / download
+pictures" on every mail, although the logo itself is embedded (CID),
+and the rewritten links look like phishing when hovered. For formal
+notices to a known list there is no use for it. Disable Opens and
+Clicks in every event destination of the set; `bounces` needs only
+Bounce, Complaint, Delivery, Reject (optionally Delivery delay).
+
+Check after any change on the AWS side: send one test mail to an
+address you can read, save it as `.eml` and search it for `awstrack`;
+it must not occur. The `.eml` in the run folder never shows it,
+because SES adds it after massmailer handed the mail over.
+
 ## Message-ID and message tags
 
 SES **replaces the `Message-ID`** with its own

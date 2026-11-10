@@ -83,6 +83,14 @@ the run.
 | per-mail `failed` with a `4xx`/`5xx` text, then `N mail(s) failed` | server rejected that mail (throttling `454`, recipient rejected `550`, size `552`, sandbox `554 Message rejected: Email address is not verified`) | read `detail` in `log.jsonl`; lower the rate, verify identities or leave the sandbox, shrink the mail; resend only failed rows (`modes/send.md`) |
 | mails arrive with the original `Message-ID` replaced | Amazon SES behaviour | expected; match by tags or address (`providers/amazon-ses.md`) |
 
+## Received mail
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Outlook (web) shows "pictures blocked / download pictures" although the logo is embedded | SES open tracking adds an external image (`awstrack.me`) | disable Opens and Clicks in the configuration set's event destinations (`providers/amazon-ses.md`, "Open and click tracking") |
+| links point to `….awstrack.me/L0/…` | SES click tracking | same |
+| test mail accepted (`Delivery` event, `250 … Queued`) but not in the inbox | the receiving server delivered it to junk/quarantine, or the client threads it into an earlier conversation with the same subject | look in junk/quarantine and the conversation view; the `Delivery` event in `events.jsonl` shows the receiving server's answer |
+
 ## Warnings
 
 | Warning | Meaning | Action |

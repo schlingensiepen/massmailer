@@ -192,7 +192,12 @@ Prompt:
 > afterwards.
 
 Checkpoint: the destination shows the topic ARN
-`arn:aws:sns:<REGION>:<ACCOUNT_ID>:<TOPIC>` and status enabled.
+`arn:aws:sns:<REGION>:<ACCOUNT_ID>:<TOPIC>` and status enabled, and
+**Opens and Clicks are not ticked** in this or any other destination of
+the set. With them, SES inserts a tracking image and rewrites all links
+in every mail; Outlook on the web then hides images until the reader
+allows them (`../providers/amazon-ses.md`, "Open and click tracking").
+Check this again whenever someone edits the event destinations.
 
 ## 7. SQS queue and subscription
 
@@ -292,7 +297,18 @@ file>` runs without an access error (queue may be empty).
    > <QUEUE> in region <REGION> from the console without deleting
    > them, and how to read the message body.
 
-3. Locally:
+3. Test send to an address you can read (`--limit 1 --redirect-to
+   <own address>`), save the received mail as `.eml` and search it for
+   `awstrack`. It must not occur; if it does, Opens/Clicks tracking is
+   on (step 6).
+
+   Prompt:
+
+   > In Amazon SES, region <REGION>, list every event destination of
+   > the configuration set <CONFIG_SET> with its enabled event types,
+   > and show me how to disable the Opens and Clicks event types.
+
+4. Locally:
 
    ```sh
    massmailer bounces --keep -c account.json -c <credentials file>
