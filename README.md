@@ -93,6 +93,16 @@ Placeholders use [MiniJinja](https://docs.rs/minijinja) syntax
 are escaped for the body format. The letterhead and an HTML body include
 their CSS with `<link rel="stylesheet">` or `<style>`; it is inlined.
 
+## Amazon SES notes
+
+- Set `ses.configuration_set` so that SES publishes bounce and complaint
+  events for the configuration set.
+- SES replaces the `Message-ID` header with its own; match bounce
+  notifications by recipient address, not by the `message_id` in
+  `log.jsonl`.
+- Keep `sending.rate_per_second` well below the account's maximum send
+  rate.
+
 ## Build from source
 
 ```sh

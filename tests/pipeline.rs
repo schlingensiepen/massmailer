@@ -64,6 +64,12 @@ fn markdown_in_letterhead() {
     assert!(text.starts_with("PC-Freunde-Fulda e.V.\n"), "{text}");
     assert!(eml.contains("multipart/alternative") && eml.contains("multipart/related"));
     assert!(eml.contains("Content-ID: <img1>"));
+    // Message-ID in the sender's domain, not the local host name
+    let mid = eml
+        .lines()
+        .find(|l| l.starts_with("Message-ID: "))
+        .expect("Message-ID header");
+    assert!(mid.ends_with("@example.org>"), "{mid}");
     assert!(
         eml.contains("Einladung zum Jahrestreffen, Anna_Maria"),
         "{eml}"
