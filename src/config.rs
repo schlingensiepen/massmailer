@@ -150,8 +150,9 @@ impl Settings {
             if !json.is_object() {
                 bail!("{}: top level must be an object", path.display());
             }
-            let base = path
-                .canonicalize()
+            // `absolute`, not `canonicalize`: on Windows the latter yields
+            // `\\?\UNC\…` paths in which `..` is not resolved.
+            let base = std::path::absolute(path)
                 .unwrap_or_else(|_| path.clone())
                 .parent()
                 .map(Path::to_path_buf)
