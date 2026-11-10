@@ -1,0 +1,8 @@
+{
+  "smtp": {
+    "host": "email-smtp.eu-central-1.amazonaws.com",
+    "port": 587,
+    "security": "starttls"
+  },
+  "sending": { "rate_per_second": 1 }
+}

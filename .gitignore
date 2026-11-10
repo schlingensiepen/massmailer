@@ -3,11 +3,14 @@
 # only example files (*.example.json) are versioned.
 config*.json
 account*.json
-absender*.json
-aussendung*.json
+sender*.json
+mailing*.json
 *.local.json
 !*.example.json
 # Run state, delivery logs, previews
 /state/
 /out/
 *.eml
+
+# run folders contain recipient addresses
+massmailer-runs/

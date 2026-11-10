@@ -1,0 +1,19 @@
+{
+  "sender": {
+    "address": "vorstand@example.org",
+    "name": "PC-Freunde-Fulda",
+    "reply_to": "vorstand@example.org"
+  },
+  "letterhead": { "dir": "letterhead" },
+  "message": {
+    "body": "message.md",
+    "subject": "Einladung zum Jahrestreffen, {{ vorname }}",
+    "preheader": "Jahrestreffen am {{ datum }}"
+  },
+  "recipients": {
+    "source": "recipients.csv",
+    "to_columns": ["to"],
+    "cc_columns": ["cc"]
+  },
+  "run": { "state_dir": "../../target/example-runs" }
+}

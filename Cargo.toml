@@ -8,8 +8,21 @@ repository = "https://github.com/schlingensiepen/massmailer"
 
 [dependencies]
 anyhow = "1.0.104"
+calamine = "0.38.0"
+chrono = "0.4.45"
+clap = { version = "4.6.7", features = ["derive"] }
 comrak = { version = "0.59.0", default-features = false }
 css-inline = { version = "0.23.1", default-features = false, features = ["stylesheet-cache"] }
 csv = "1.4.0"
-lettre = { version = "0.11.23", default-features = false, features = ["builder"] }
+html2text = "0.17.4"
+imagesize = "0.15.0"
+lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "hostname", "rustls-tls"] }
+lol_html = "3.0.3"
 minijinja = "3.1.0"
+resvg = "0.49.0"
+scraper = "0.29.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+ureq = "3.5.1"
+url = "2.5.8"
