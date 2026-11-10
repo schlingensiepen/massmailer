@@ -37,8 +37,8 @@ impl Letterhead {
             fs::read_to_string(dir.join(name))
                 .with_context(|| format!("letterhead: cannot read {}", dir.join(name).display()))
         };
-        let layout_html = read("layout.html")?;
-        let layout_txt = read("layout.txt")?;
+        let layout_html = normalize_newlines(&read("layout.html")?);
+        let layout_txt = normalize_newlines(&read("layout.txt")?);
         for (name, body) in [("layout.html", &layout_html), ("layout.txt", &layout_txt)] {
             anyhow::ensure!(
                 body.contains("{{ content }}"),
@@ -60,6 +60,11 @@ impl Letterhead {
 pub struct Rendered {
     pub html: String,
     pub text: String,
+}
+
+/// Convert CRLF and lone CR to LF (templates edited on Windows).
+pub fn normalize_newlines(s: &str) -> String {
+    s.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 /// Escape every ASCII punctuation character with a backslash (CommonMark allows
@@ -89,7 +94,8 @@ pub fn fill_template(template: &str, values: &BTreeMap<String, String>) -> Resul
         out.write_str(&s)
             .map_err(|_| minijinja::Error::new(ErrorKind::WriteFailure, "write failed"))
     });
-    env.add_template("message.md", template)?;
+    let template = normalize_newlines(template);
+    env.add_template("message.md", &template)?;
     Ok(env.get_template("message.md")?.render(values)?)
 }
 

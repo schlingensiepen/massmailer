@@ -93,3 +93,15 @@ fn render_example() {
     let raw2 = String::from_utf8(m2.formatted()).unwrap();
     assert!(raw2.contains("carla@example.org") && raw2.contains("dora@example.org"));
 }
+
+#[test]
+fn crlf_template_and_letterhead() {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/pc-freunde-fulda/letterhead");
+    let lh = Letterhead::load(&base).unwrap();
+    let mut values = BTreeMap::new();
+    values.insert("name".to_string(), "Anna".to_string());
+    let r = render::render("Hallo {{ name }},\r\n\r\nzweiter Absatz.\r\n", &values, &lh).unwrap();
+    assert!(!r.text.contains('\r'), "text: {:?}", r.text);
+    assert!(r.text.contains("Hallo Anna,\n\nzweiter Absatz."));
+    assert!(r.html.contains("<p>zweiter Absatz.</p>"));
+}
