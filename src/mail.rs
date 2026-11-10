@@ -32,6 +32,30 @@ fn raw(name: &'static str, value: &str) -> HeaderValue {
     HeaderValue::new(HeaderName::new_from_ascii_str(name), value.to_string())
 }
 
+fn random_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut seed = [0u8; 16];
+    getrandom_fill(&mut seed);
+    let tail: String = seed.iter().map(|b| format!("{b:02x}")).collect();
+    format!("{nanos:x}.{tail}")
+}
+
+/// 16 random bytes from the OS-seeded hasher (no extra dependency).
+fn getrandom_fill(buf: &mut [u8; 16]) {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+    for chunk in buf.chunks_mut(8) {
+        let mut h = RandomState::new().build_hasher();
+        h.write_usize(chunk.as_ptr() as usize);
+        let v = h.finish().to_le_bytes();
+        chunk.copy_from_slice(&v[..chunk.len()]);
+    }
+}
+
 pub fn content_type_for(filename: &str) -> &'static str {
     let lower = filename.to_ascii_lowercase();
     match lower.rsplit('.').next().unwrap_or("") {
@@ -65,9 +89,11 @@ pub fn build(
     if addr.to.is_empty() {
         bail!("no To address");
     }
+    // Message-ID in the sender's domain (lettre would use the local host name).
+    let domain = sender.from.email.domain().to_string();
     let mut b = Message::builder()
         .subject(r.subject.clone())
-        .message_id(None);
+        .message_id(Some(format!("<{}@{domain}>", random_id())));
     b = match &sender.on_behalf_of {
         Some(principal) => b.from(principal.clone()).sender(sender.from.clone()),
         None => b.from(sender.from.clone()),
