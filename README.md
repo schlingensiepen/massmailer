@@ -49,6 +49,7 @@ massmailer render  -c mailing.json                 # .eml/.html/.txt per mail
 massmailer send --dry-run -c account.json -c mailing.json
 massmailer send --limit 5 --redirect-to me@example.org -c account.json -c mailing.json
 massmailer send -c account.json -c mailing.json    # asks before sending
+massmailer send --bounces-after 5 -c account.json -c mailing.json   # send, wait, fetch bounces
 massmailer bounces -c account.json                 # next day: SES events into the run folders
 ```
 
@@ -75,6 +76,8 @@ can be set as an environment variable: `smtp.password` →
 | `smtp.username`, `smtp.password` | credentials (environment or `--smtp-username`/`--smtp-password`) |
 | `sending.rate_per_second` | send rate (default 1) |
 | `sending.connections` | parallel SMTP connections (default 3, 1–10) |
+| `sending.bounces_before`, `sending.bounces_after_minutes` | fetch bounces before sending / N minutes after (`--bounces-before`, `--bounces-after N`) |
+| `bounces.purge` | also delete events of runs not in `run.state_dir` (`bounces --purge`, `send --purge-bounces`) |
 | `sending.limit`, `sending.redirect_to` | only the first N mails; deliver all to one test address |
 | `ses.configuration_set` | sets `X-SES-CONFIGURATION-SET` |
 | `sender.address`, `sender.name` | `From` |

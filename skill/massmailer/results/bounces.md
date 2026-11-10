@@ -20,6 +20,14 @@ massmailer bounces -c account.json -c ~/mailings-secrets/aws.json --wait 20   # 
 ```
 
 - `--keep`: never delete queue messages.
+- `--purge`: also delete events of runs that are not in this
+  `run.state_dir` (saved to `unmatched-events.jsonl` first). Without
+  it (0.2.1 and later) such events **stay in the queue**, so several
+  mailings with different state dirs can share one queue; the summary
+  says `N event(s) of runs not in this run.state_dir left in the
+  queue`. Simplest setup: one common `run.state_dir` for all mailings.
+- `send --bounces-before` / `--bounces-after N` / `--purge-bounces`
+  call this from a send (`../modes/send.md`).
 - `--wait N`: long-poll seconds per receive call, 1–20, default 5.
 - `--aws-access-key-id`, `--aws-secret-access-key`: credentials as
   flags (visible in the process list; prefer the file or environment).

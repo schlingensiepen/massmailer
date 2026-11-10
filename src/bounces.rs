@@ -20,8 +20,11 @@ use crate::config::Settings;
 pub struct Options {
     /// never delete messages from the queue
     pub keep: bool,
-    /// long-poll seconds per receive call (0–20)
+    /// long-poll seconds per receive call (1–20)
     pub wait: u32,
+    /// also delete events that belong to no run in this state_dir (saved
+    /// to unmatched-events.jsonl first); without it they stay in the queue
+    pub purge: bool,
 }
 
 /// One affected recipient of an event.
@@ -536,7 +539,8 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
     let sqs = Sqs::new(s)?;
     let mut per_kind: BTreeMap<String, usize> = BTreeMap::new();
     let mut per_run: BTreeMap<String, usize> = BTreeMap::new();
-    let (mut total, mut unmatched, mut unreadable, mut duplicates, mut notices) = (0, 0, 0, 0, 0);
+    let (mut total, mut unmatched, mut unreadable, mut duplicates, mut notices, mut left) =
+        (0, 0, 0, 0, 0, 0);
     // events already recorded earlier (e.g. after a run with --keep, or a
     // crash between writing and deleting): not written again
     let mut known = known_ids(&state_dir, &runs);
@@ -559,6 +563,7 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
             }
             new_in_batch += 1;
             total += 1;
+            let mut leave = false;
             match parse_event(&body) {
                 Ok(ev) if ev.kind == "notice" => {
                     // not an SES event; nothing to record
@@ -570,8 +575,17 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
                     } else {
                         ev.id.clone()
                     };
+                    let foreign = !ev.recipients.is_empty()
+                        && ev
+                            .recipients
+                            .iter()
+                            .all(|r| find(&runs, &ev, &r.address).is_none());
                     if !id.is_empty() && known.contains(&id) {
                         duplicates += 1;
+                    } else if foreign && !opt.purge {
+                        // belongs to a run in another state_dir: leave it for that call
+                        left += 1;
+                        leave = true;
                     } else {
                         let (written, to_unmatched) = record(&state_dir, &runs, &ev, &id)?;
                         known.insert(id);
@@ -605,7 +619,7 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
                     )?;
                 }
             }
-            if !opt.keep {
+            if !opt.keep && !leave {
                 sqs.delete(&receipt)?;
             }
         }
@@ -625,6 +639,11 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
     }
     if notices > 0 {
         eprintln!("  {notices} SNS notice(s) without SES event (e.g. topic validation), ignored");
+    }
+    if left > 0 {
+        eprintln!(
+            "  {left} event(s) of runs not in this run.state_dir left in the queue (--purge deletes them)"
+        );
     }
     if duplicates > 0 {
         eprintln!("  {duplicates} already recorded earlier, not written again");

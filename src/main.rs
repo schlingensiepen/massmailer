@@ -51,15 +51,24 @@ enum Command {
         /// Do not ask for confirmation
         #[arg(short, long)]
         yes: bool,
+        /// Before sending, fetch waiting bounces into their runs (needs aws.* settings)
+        #[arg(long)]
+        bounces_before: bool,
         /// After sending, wait this many minutes and then fetch bounces (needs aws.* settings)
         #[arg(long, value_name = "MINUTES")]
         bounces_after: Option<f64>,
+        /// With --bounces-before/--bounces-after: empty the bounce queue completely
+        #[arg(long)]
+        purge_bounces: bool,
     },
     /// Fetch bounce, complaint and delivery events from the SQS queue and record them in the run folders
     Bounces {
         /// Leave the messages in the queue (for testing)
         #[arg(long)]
         keep: bool,
+        /// Also delete events of runs not in this run.state_dir (saved to unmatched-events.jsonl)
+        #[arg(long)]
+        purge: bool,
         /// Long-poll seconds per request (1-20)
         #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u32).range(1..=20))]
         wait: u32,
@@ -119,8 +128,16 @@ fn real_main(cli: Cli) -> anyhow::Result<()> {
             limit,
             redirect_to,
             yes,
+            bounces_before,
             bounces_after,
+            purge_bounces,
         } => {
+            if *bounces_before {
+                overrides.push(("sending.bounces_before".into(), "true".into()));
+            }
+            if *purge_bounces {
+                overrides.push(("bounces.purge".into(), "true".into()));
+            }
             if let Some(m) = bounces_after {
                 overrides.push(("sending.bounces_after_minutes".into(), m.to_string()));
             }
@@ -145,20 +162,39 @@ fn real_main(cli: Cli) -> anyhow::Result<()> {
     if let Command::Columns = cli.command {
         return run::columns(&settings);
     }
-    if let Command::Bounces { keep, wait, .. } = cli.command {
-        return bounces::execute(&settings, &bounces::Options { keep, wait });
+    if let Command::Bounces {
+        keep, wait, purge, ..
+    } = cli.command
+    {
+        let purge = purge || settings.bool("bounces.purge", false)?;
+        return bounces::execute(&settings, &bounces::Options { keep, wait, purge });
     }
-    let bounces_after = match mode {
-        Mode::Send => settings.num("sending.bounces_after_minutes")?,
-        _ => None,
+    let (bounces_before, bounces_after) = match mode {
+        Mode::Send => (
+            settings.bool("sending.bounces_before", false)?,
+            settings.num("sending.bounces_after_minutes")?,
+        ),
+        _ => (false, None),
     };
-    if let Some(m) = bounces_after {
-        if !(0.0..=1440.0).contains(&m) {
-            anyhow::bail!("sending.bounces_after_minutes must be between 0 and 1440");
-        }
+    let fetch = bounces::Options {
+        keep: false,
+        wait: 5,
+        purge: settings.bool("bounces.purge", false)?,
+    };
+    if let Some(m) = bounces_after
+        && !(0.0..=1440.0).contains(&m)
+    {
+        anyhow::bail!("sending.bounces_after_minutes must be between 0 and 1440");
+    }
+    if bounces_before || bounces_after.is_some() {
         // fail before sending, not after the wait
-        bounces::check_settings(&settings)
-            .map_err(|e| anyhow::anyhow!("--bounces-after needs the bounces settings: {e:#}"))?;
+        bounces::check_settings(&settings).map_err(|e| {
+            anyhow::anyhow!("--bounces-before/--bounces-after need the bounces settings: {e:#}")
+        })?;
+    }
+    if bounces_before {
+        eprintln!("fetching waiting bounces before sending");
+        bounces::execute(&settings, &fetch)?;
     }
     let result = run::execute(
         &settings,
@@ -176,13 +212,7 @@ fn real_main(cli: Cli) -> anyhow::Result<()> {
                 .is_err_and(|e| e.to_string().ends_with("mail(s) failed"))
         {
             wait_minutes(m);
-            bounces::execute(
-                &settings,
-                &bounces::Options {
-                    keep: false,
-                    wait: 5,
-                },
-            )?;
+            bounces::execute(&settings, &fetch)?;
         }
     }
     result

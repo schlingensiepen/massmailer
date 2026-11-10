@@ -112,6 +112,9 @@ SMTP settings are only read for a real send. `check`, `render` and
 | Key | Meaning | Default |
 |---|---|---|
 | `sending.rate_per_second` | mails per second: a dispatcher hands at most one mail per 1/rate seconds to the sending workers (gap measured between hand-offs); minimum 0.01 | 1 |
+| `sending.bounces_before` | `send --bounces-before`: fetch waiting bounces before sending | false |
+| `sending.bounces_after_minutes` | `send --bounces-after N`: wait N minutes (0–1440) after sending, then fetch bounces | — |
+| `bounces.purge` | `--purge` / `--purge-bounces`: also delete events of runs not in this `run.state_dir` | false |
 | `sending.connections` | parallel SMTP connections (worker threads over a connection pool), 1–10; the rate limit applies across all of them. For a provider limit of 1 mail/s set `rate_per_second` to 1, connections may stay | 3 |
 | `sending.limit` | build and send only the first N rows (after skipping); `--limit N` | all |
 | `sending.redirect_to` | deliver every mail to this one address, with the test subject prefix; `--redirect-to ADDR` | – |

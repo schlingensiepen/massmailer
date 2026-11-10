@@ -25,6 +25,8 @@ pub const KNOWN_KEYS: &[&str] = &[
     "sending.limit",
     "sending.connections",
     "sending.bounces_after_minutes",
+    "sending.bounces_before",
+    "bounces.purge",
     "run.state_dir",
     "sender.address",
     "sender.name",

@@ -8,9 +8,11 @@ description: Send personalised bulk email (formal notices, invitations, press re
 `massmailer` is a command-line tool: one body file (Markdown, HTML or
 plain text) with placeholders + one recipient list = one mail per row,
 wrapped in a letterhead, sent via SMTP at a limited rate and recorded in
-a run folder. This skill matches massmailer **0.2.0** (`massmailer
+a run folder. This skill matches massmailer **0.2.1** (`massmailer
 --version`); the `bounces` command, the `X-SES-MESSAGE-TAGS` header and
-parallel SMTP connections (`sending.connections`) exist from 0.2.0 on.
+parallel SMTP connections (`sending.connections`) exist from 0.2.0 on,
+`send --bounces-before/--bounces-after/--purge-bounces` and
+`bounces --purge` from 0.2.1.
 
 ## When to use, when not
 
@@ -60,6 +62,7 @@ massmailer send --limit 1 --redirect-to me@example.net \
                 -c account.json -c mailing.json          # 5 real mail to the user
 massmailer send -c account.json -c mailing.json          # 6 real send, after the go
 massmailer bounces -c account.json                       # 7 next day: bounces
+                                                         #   (or send --bounces-after 5)
 ```
 
 `-c` may be given several times; the later file wins. Keep account

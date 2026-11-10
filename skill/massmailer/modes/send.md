@@ -103,3 +103,27 @@ have no log line. So, before resending:
   (`../results/run-folder.md`).
 - Next day: `massmailer bounces` with the same `run.state_dir`
   (`../results/bounces.md`).
+
+## Fetching bounces around the send (0.2.1)
+
+`send` can call `bounces` itself; it needs the `aws.*` settings, which
+are checked **before** anything is sent:
+
+```sh
+massmailer send --bounces-before …                       # first file waiting events into their runs
+massmailer send --bounces-after 5 …                      # send, wait 5 min, fetch
+massmailer send --bounces-before --bounces-after 5 --purge-bounces …
+                                                         # …and leave the queue empty
+```
+
+- `--bounces-before` (`sending.bounces_before`): fetch what is waiting,
+  so the queue holds only events of this send afterwards.
+- `--bounces-after MINUTES` (`sending.bounces_after_minutes`, 0–1440):
+  after the last mail, wait (remaining time printed once a minute;
+  Ctrl-C only ends the wait, the send is logged completely) and fetch.
+  Runs also when single mails failed; not when the send was aborted.
+- `--purge-bounces` (`bounces.purge`): those fetches also delete
+  events of runs that are not in this `run.state_dir`, after saving
+  them to `unmatched-events.jsonl`. Without it they stay in the queue
+  for a `bounces` call with the right state dir.
+- Late bounces arrive hours later; fetch again the next day.
