@@ -8,10 +8,9 @@ description: Send personalised bulk email (formal notices, invitations, press re
 `massmailer` is a command-line tool: one body file (Markdown, HTML or
 plain text) with placeholders + one recipient list = one mail per row,
 wrapped in a letterhead, sent via SMTP at a limited rate and recorded in
-a run folder. This skill matches massmailer **0.1.0** (`massmailer
---version`); the `bounces` command and the `X-SES-MESSAGE-TAGS` header
-need the release after 0.1.0 (`massmailer bounces --help` tells you
-whether the installed binary has it).
+a run folder. This skill matches massmailer **0.2.0** (`massmailer
+--version`); the `bounces` command, the `X-SES-MESSAGE-TAGS` header and
+parallel SMTP connections (`sending.connections`) exist from 0.2.0 on.
 
 ## When to use, when not
 
@@ -34,10 +33,13 @@ needs opt-out, point to a newsletter service instead.
    mail looks right. Only then the real send.
 3. **Never write credentials** (SMTP password, AWS keys, bearer tokens)
    into config files inside a repository, into chat or into shell
-   history you control. Use environment variables (`MASSMAILER_SMTP_PASSWORD`
-   etc.), the `--smtp-password` flag entered by the user, or a separate
-   config file outside any repository with restrictive permissions.
-   `-v` masks secrets; still do not paste its output into shared places.
+   history you control. The three acceptable places: a separate config
+   file outside any repository with restrictive permissions (passed as
+   the last `-c`), environment variables (`MASSMAILER_SMTP_PASSWORD`
+   etc.), or CLI flags typed by the user (`--smtp-password`,
+   `--aws-secret-access-key`; visible in the process list, so prefer
+   file or environment). `-v` masks secrets; still do not paste its
+   output into shared places.
 4. **Do not print recipient data** (addresses, names, rows) unless the
    user asks for it. `columns` shows only column names; `check` shows
    only counts. Quote a row only when an error names it and the user
@@ -61,10 +63,13 @@ massmailer bounces -c account.json                       # 7 next day: bounces
 ```
 
 `-c` may be given several times; the later file wins. Keep account
-(SMTP host, rate) and mailing (sender, body, list) in separate files.
-Every step 2-6 creates a run folder (default `massmailer-runs/`) with a
-copy of all inputs, every mail as `.eml` and, from step 4 on, a
-`log.jsonl`.
+(SMTP host, rate, `run.state_dir`, `aws.*`) and mailing (sender, body,
+list) in separate files; credentials in a third file outside any
+repository or in the environment. Every step 2-6 creates a run folder
+(default `massmailer-runs/`) with a copy of all inputs, every mail as
+`.eml` and, from step 4 on, a `log.jsonl`. Step 7 must run with the
+**same `run.state_dir`** as the send, because it matches events to the
+run folders there.
 
 ## Installing this skill
 

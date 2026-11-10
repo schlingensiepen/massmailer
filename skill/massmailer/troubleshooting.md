@@ -75,8 +75,11 @@ the run.
 
 | Message | Cause | Fix |
 |---|---|---|
+| `nothing to send` | no row left after skipping and limiting | expected; check `recipients.skip_column`, `sending.limit` |
 | `aborted, nothing sent` | confirmation not answered with `y`/`yes`/`j`/`ja`; also when stdin is closed or empty | run interactively and let the user answer, or `--yes` after the user's explicit go |
+| `cannot write log.jsonl; sending stopped: …` | disk full or permissions while sending; no further mails were released, in-flight ones finished | the mails already handed to the server have no log line: see `modes/send.md`, "Interrupting", before resending |
 | `SMTP connection or login failed: …` | host/port/security wrong, firewall, wrong credentials, SES SMTP credentials vs IAM keys mixed up | check `smtp.*` with `-v`; try the other port/security pair; regenerate SMTP credentials |
+| ``sending.connections`` has no effect / too many connections | value is clamped to 1–10 | set 1–10; the rate limit applies across all connections |
 | per-mail `failed` with a `4xx`/`5xx` text, then `N mail(s) failed` | server rejected that mail (throttling `454`, recipient rejected `550`, size `552`, sandbox `554 Message rejected: Email address is not verified`) | read `detail` in `log.jsonl`; lower the rate, verify identities or leave the sandbox, shrink the mail; resend only failed rows (`modes/send.md`) |
 | mails arrive with the original `Message-ID` replaced | Amazon SES behaviour | expected; match by tags or address (`providers/amazon-ses.md`) |
 
@@ -93,7 +96,15 @@ the run.
 
 | Message | Cause | Fix |
 |---|---|---|
-| missing `aws.*` setting | not configured | `setup/configuration.md`, "Bounces" |
-| access denied on receive/delete | IAM policy lacks `sqs:ReceiveMessage`/`sqs:DeleteMessage`/`sqs:GetQueueAttributes` on the queue, or wrong region | fix the policy or `aws.region` |
-| queue empty, no events although mails bounced | configuration set not set on the mails (`ses.configuration_set`), event destination missing event types, SNS → SQS subscription missing or raw delivery on | `providers/amazon-ses.md`, "Bounces" |
-| events in `unmatched-events.jsonl` | no tags (older binary) and address not found in any `log.jsonl` under `run.state_dir`; or a different `run.state_dir` than at send time | run `bounces` with the same `run.state_dir`; match by address manually from the raw event |
+| `missing setting `aws.sqs_queue_url`` (also `aws.access_key_id`, `aws.secret_access_key`) | not configured | `setup/configuration.md`, "Bounces"; credentials from the file outside the repository, env or flag |
+| `aws.sqs_queue_url is not a URL` / `aws.sqs_queue_url has no host` | malformed URL | use the full `https://sqs.<region>.amazonaws.com/<account>/<queue>` URL from the SQS console |
+| `aws.region missing` | queue URL host is not `sqs.<region>.amazonaws.com` and `aws.region` unset | set `aws.region` |
+| `SQS ReceiveMessage: HTTP 403 … AccessDenied` / `SQS DeleteMessage: HTTP 403 …` | IAM policy lacks `sqs:ReceiveMessage` or `sqs:DeleteMessage` on the queue ARN; wrong key; wrong region; session-token credentials | fix the policy or key; only long-lived IAM keys work |
+| `SQS ReceiveMessage: HTTP 400 … InvalidAddress` / `QueueDoesNotExist` | queue URL wrong or in another region | copy the URL from the console |
+| `SQS …: request failed` | network, DNS, proxy | retry; check connectivity to `sqs.<region>.amazonaws.com` |
+| `cannot write <path>` | `run.state_dir` or a run folder not writable | fix permissions |
+| `--wait` rejected | value outside 1–20 | pick 1–20 |
+| `0 message(s) from the queue` although mails bounced | configuration set not on the mails (`ses.configuration_set`), event destination missing "Hard bounces"/"Complaints", SNS → SQS subscription missing or unconfirmed, queue policy without the topic ARN, different region; or the messages are still invisible after a `--keep` run (visibility timeout, default 30 s) | `providers/amazon-ses.md`, "Bounces"; wait half a minute after `--keep` |
+| `N already recorded earlier, not written again` | events whose id is already in `events.jsonl`/`unmatched-events.jsonl` (earlier `--keep` run, crash between write and delete, SQS redelivery) | expected; the queue is cleaned up, nothing is duplicated |
+| `U unmatched, R unreadable: …/unmatched-events.jsonl` | no tags (mail sent by 0.1.0) and address not in `to`/`cc`/`bcc` of any `log.jsonl` under `run.state_dir`; or a different `run.state_dir` than at send time; or a recipient of a multi-recipient event in no run; unreadable = queue message not JSON | run `bounces` with the same `run.state_dir`; match by address manually from the raw event |
+| `bounces.csv` has empty `mail`/`line` | run matched by tag, but the mail number is not in the log (interrupted send) or no tags and address not in the log | look the address up in `mails/*.eml` of that run |

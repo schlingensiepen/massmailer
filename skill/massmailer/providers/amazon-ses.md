@@ -21,11 +21,16 @@ kinds of SES SMTP endpoints fit:
    `ses:SendRawEmail` permission; they are not the IAM access key and
    secret themselves. They are generated once in the SES console and
    cannot be shown again, only replaced.
-2. **Mail Manager SMTP ingress endpoint**: a host name the user gets
-   when creating the ingress endpoint, usually port 25 or 587 with
-   STARTTLS, with the credentials configured in the endpoint's
-   authentication settings. Same massmailer settings, different host,
-   port and secret.
+2. **Mail Manager SMTP ingress endpoint** with a rule set whose action
+   is "Send to internet": the endpoint's host name and port are shown
+   after creation, the credentials are those configured in the
+   endpoint's authentication settings. Same massmailer settings,
+   different host, port and secret. This path was verified in one real
+   setup (mails delivered, DKIM and DMARC pass); whether
+   configuration-set events (bounces) arrive through it has not been
+   confirmed yet. Check the details against the current AWS
+   documentation and console; Mail Manager bills per message on top of
+   SES.
 
 Either way: `sender.address` (and `sender.on_behalf_of` if used) must
 be a verified identity (address or domain) in that region, and the
@@ -48,8 +53,8 @@ SES **replaces the `Message-ID`** with its own
 (`<…@<region>.amazonses.com>`). The `message_id` in `log.jsonl` is
 therefore not what the recipient sees and not what appears in bounce
 events. For matching, massmailer sets `X-SES-MESSAGE-TAGS:
-massmailer-run=<run folder name>, massmailer-mail=<NNNN>` (release
-after 0.1.0); SES strips this header and delivers the tags in the event
+massmailer-run=<run folder name>, massmailer-mail=<NNNN>` (from
+0.2.0); SES strips this header and delivers the tags in the event
 JSON as `mail.tags`, which `bounces` uses. The header is not visible to
 recipients.
 
@@ -61,6 +66,12 @@ recipients.
   limit is 14) and the row count below the remaining daily quota. SES
   answers `454 Throttling failure` when the rate is exceeded; such
   mails are logged as `failed` and are not retried.
+- `sending.connections` (default 3) parallel SMTP connections share
+  that rate: the dispatcher releases at most `rate_per_second` mails
+  per second in total, whatever the number of connections. For an
+  account limited to 1 mail/s set `sending.rate_per_second` to 1; the
+  connections may stay at the default. Several connections only help
+  when single sends are slow (large attachments, high latency).
 - Message size: SES accepts up to 40 MB after encoding, which is why
   `message.max_mail_size_mb` is capped at 40; the default 5 MB is a
   sensible value for many mailboxes.
@@ -106,27 +117,32 @@ user's setup, all in the sending region:
    rejection only once SES has given up retrying (then with
    `bounceType` `Transient`). Temporary problems first appear as
    **Delivery delay** events (`DeliveryDelay`), which `bounces`
-   records as `other` in `events.jsonl` and not in `bounces.csv`.
+   records under that name in `events.jsonl` and not in `bounces.csv`.
    Enable "Delivery delays" if the user wants to see those too. (This
    reflects the SES event publishing documentation as known at writing
    time; check the event-type descriptions in the console.)
 2. **SNS topic** that this destination publishes to.
 3. **SQS queue** subscribed to the topic (standard queue; message
    retention 14 days, the maximum, so events survive until the user
-   runs `bounces`; raw message delivery off, so the SNS envelope with
-   its `Message` field arrives as `bounces` expects). The queue policy
-   must allow the topic to `sqs:SendMessage`.
+   runs `bounces`; raw message delivery off (the default), so the SNS
+   `MessageId` serves as the event id for de-duplication; raw delivery
+   is read too). The queue policy must allow the topic to
+   `sqs:SendMessage`.
 4. **IAM user** for massmailer with a policy that allows only
-   `sqs:ReceiveMessage`, `sqs:DeleteMessage` and
-   `sqs:GetQueueAttributes` on that queue's ARN. Its access key pair
-   goes into `MASSMAILER_AWS_ACCESS_KEY_ID` /
-   `MASSMAILER_AWS_SECRET_ACCESS_KEY` or a separate config file.
-5. massmailer settings: `aws.region`, `aws.sqs_queue_url` (the full
-   `https://sqs.<region>.amazonaws.com/<account>/<queue>` URL),
+   `sqs:ReceiveMessage` and `sqs:DeleteMessage` on that queue's ARN
+   (these two are all `bounces` calls). Its long-lived access key pair
+   goes into a separate config file outside any repository or into
+   `MASSMAILER_AWS_ACCESS_KEY_ID` / `MASSMAILER_AWS_SECRET_ACCESS_KEY`;
+   temporary credentials with a session token are not supported.
+5. massmailer settings: `aws.sqs_queue_url` (the full
+   `https://sqs.<region>.amazonaws.com/<account>/<queue>` URL; the
+   region is taken from it, `aws.region` only for other host forms),
    `ses.configuration_set` on the sending side.
 
 Identity-level notifications (SES identity → SNS topic, `notificationType`
-JSON) can feed the same queue; `bounces` reads both shapes.
+JSON) can feed the same queue; `bounces` reads both shapes, with or
+without the SNS envelope (raw message delivery works too, but then the
+SQS message id is used as the event id for de-duplication).
 
 ## Deliverability checklist for the sender domain
 

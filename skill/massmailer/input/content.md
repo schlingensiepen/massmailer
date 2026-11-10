@@ -127,8 +127,8 @@ larger than `fetch.max_size_mb` (default 20) are refused when loading.
 `To`/`Cc`/`Bcc`, `Subject`, `Message-ID` as `<random@sender-domain>`,
 `Auto-Submitted: auto-generated`, `X-SES-CONFIGURATION-SET` (if
 `ses.configuration_set`), `X-SES-MESSAGE-TAGS:
-massmailer-run=<run folder name>, massmailer-mail=<NNNN>` (from the
-release after 0.1.0; used by `bounces`), and on a redirected test send
+massmailer-run=<run folder name>, massmailer-mail=<NNNN>` (from 0.2.0;
+used by `bounces`), and on a redirected test send
 `X-Massmailer-Original-Recipients`.
 
 MIME structure: text only; `multipart/alternative` (text, HTML);

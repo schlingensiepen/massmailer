@@ -137,6 +137,10 @@ managed credentials or a secret), a traffic policy that allows the
 sender, and a rule set with a rule whose action is "Send to internet"
 (outbound) for mail from the user's identity. The endpoint's host name
 is shown after creation; port and credentials as configured there.
+This path was verified in one real setup (mails delivered, DKIM and
+DMARC pass); whether configuration-set events for `bounces` arrive
+through it has not been confirmed yet. Check every detail against the
+current AWS documentation and the console.
 
 Prompt:
 
@@ -172,8 +176,9 @@ Prompt:
 What to look for: in the configuration set → Event destinations → Add
 destination. Event types: **Hard bounces** (this is the `Bounce` event
 massmailer evaluates), **Complaints**, **Deliveries**, **Rejects**,
-optionally **Delivery delays** (temporary problems; recorded by
-`bounces` as `other`). Destination type Amazon SNS → create a new
+optionally **Delivery delays** (temporary problems; `bounces` records
+them as `DeliveryDelay` in `events.jsonl`, not in `bounces.csv`).
+Destination type Amazon SNS → create a new
 topic `<TOPIC>` (standard). Not needed: Sends, Opens, Clicks (tracking
 is wrong for formal notices), Rendering failures, Subscriptions.
 
@@ -195,8 +200,9 @@ What to look for: SQS → Create queue → **Standard**, name `<QUEUE>`;
 Message retention period **14 days** (maximum, so events wait until
 `bounces` runs); Access policy "Advanced" with a statement that lets
 the topic send; then SNS → topic → Create subscription → protocol SQS,
-endpoint = queue ARN, **"Enable raw message delivery" OFF** (massmailer
-expects the SNS envelope with its `Message` field). SQS subscriptions
+endpoint = queue ARN, "Enable raw message delivery" **off** (the
+default; massmailer then uses the SNS `MessageId` to recognise events it
+has already recorded; raw delivery is read as well). SQS subscriptions
 in the same account confirm automatically.
 
 Queue access policy to prepare (replace placeholders):
@@ -226,7 +232,8 @@ Prompt:
 
 Checkpoint: subscription status "Confirmed"; the queue URL
 `https://sqs.<REGION>.amazonaws.com/<ACCOUNT_ID>/<QUEUE>` goes into
-`aws.sqs_queue_url`, `<REGION>` into `aws.region`.
+`aws.sqs_queue_url`; massmailer reads the region from that host, so
+`aws.region` is only needed for another host form.
 
 ## 8. IAM user that may only read the queue
 
@@ -234,14 +241,16 @@ What to look for: IAM → Users → Create user `<IAM_USER>`, no console
 access; attach an inline policy with the JSON below; then Security
 credentials → Create access key (use case "Application running outside
 AWS"). The key pair is shown once; the user writes it into the
-credentials file (`aws.access_key_id`, `aws.secret_access_key`).
+credentials file (`aws.access_key_id`, `aws.secret_access_key`). A
+long-lived key is needed: massmailer does not support temporary
+credentials with a session token.
 
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [{
     "Effect": "Allow",
-    "Action": ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"],
+    "Action": ["sqs:ReceiveMessage", "sqs:DeleteMessage"],
     "Resource": "arn:aws:sqs:<REGION>:<ACCOUNT_ID>:<QUEUE>"
   }]
 }
@@ -250,8 +259,8 @@ credentials file (`aws.access_key_id`, `aws.secret_access_key`).
 Prompt:
 
 > In IAM, create a user named <IAM_USER> without console access and
-> with an inline policy that allows only sqs:ReceiveMessage,
-> sqs:DeleteMessage and sqs:GetQueueAttributes on the queue
+> with an inline policy that allows only sqs:ReceiveMessage and
+> sqs:DeleteMessage on the queue
 > arn:aws:sqs:<REGION>:<ACCOUNT_ID>:<QUEUE>, nothing else. Then show me
 > how to create an access key for this user for an application running
 > outside AWS and where I can download it once.
@@ -291,9 +300,15 @@ file>` runs without an access error (queue may be empty).
 
    Checkpoint: the summary counts one Bounce, and the test run's folder
    has `events.jsonl` and `bounces.csv` with one `Permanent` row for
-   `mail 0001`. Then run once without `--keep` to clear the queue.
+   `mail 0001`. Then run once without `--keep` to clear the queue:
+   the event is recognised by its id and not written twice (`1 already
+   recorded earlier, not written again`). After `--keep` the received
+   messages stay invisible for the queue's visibility timeout (default
+   30 s), so wait half a minute, or the second run sees an empty queue
+   and the message is cleared by a later run.
 
 If nothing arrives: `ses.configuration_set` set and spelled like the
 configuration set? Event destination enabled with "Hard bounces"?
-Subscription confirmed, raw delivery off? Queue policy with the topic
-ARN? Region the same everywhere? `../troubleshooting.md`, "Bounces".
+Subscription confirmed? Queue policy with the topic ARN? Region the
+same everywhere? Did a `--keep` run less than a visibility timeout
+(30 s) ago hide the messages? `../troubleshooting.md`, "Bounces".

@@ -37,12 +37,18 @@ the record and should be kept with the mailing.
     0002.eml
     0001.html, 0001.txt     render mode only
   log.jsonl                 dry-run and send only; one line per mail
-  events.jsonl              written by `bounces`: raw events for this run
+  events.jsonl              written by `bounces`: events for this run
   bounces.csv               written by `bounces`: one row per affected recipient
 ```
 
+Next to the run folders, `bounces` writes
+`<run.state_dir>/unmatched-events.jsonl` for events it cannot assign
+to a run.
+
 The recipient list and all attachments are inside `inputs/`, so a
-`send` folder contains personal data. Treat it like the list itself.
+`send` folder contains personal data; `events.jsonl` and
+`unmatched-events.jsonl` contain recipient addresses too. Treat them
+like the list itself.
 
 ## manifest.json
 
@@ -64,7 +70,9 @@ used: compare `sha256` with `sha256sum` of the user's current file.
 
 ## log.jsonl
 
-One JSON object per line, in sending order:
+One JSON object per line, written as each result arrives: in **completion
+order**, which with parallel connections (`sending.connections`) is not
+mail order. Use the `mail` and `line` fields, not the position.
 
 | Field | Meaning |
 |---|---|
@@ -72,6 +80,7 @@ One JSON object per line, in sending order:
 | `mail` | `mails/0001.eml`, the file for this entry |
 | `line` | row of the recipient list (header = line 1) |
 | `to` | the `To` addresses as sent, comma-separated; on a redirect the test address |
+| `cc`, `bcc` | the `Cc`/`Bcc` addresses as sent, comma-separated; only present when non-empty |
 | `message_id` | the `Message-ID` massmailer generated (`<…@sender-domain>`); Amazon SES replaces it in transit, see `../providers/amazon-ses.md` |
 | `bytes` | size of the encoded message |
 | `attachments` | `[{"file": "…", "sha256": "…"}]`, common and per-row attachments |
@@ -84,6 +93,7 @@ Useful queries (any JSON-lines tool; `jq` shown):
 jq -r 'select(.status=="failed") | "\(.line)\t\(.to)\t\(.detail)"' log.jsonl
 jq -r '.status' log.jsonl | sort | uniq -c
 jq -r 'select(.to | test("example.net")) | .mail' log.jsonl
+jq -r '.mail' log.jsonl | sort > logged; ls mails/*.eml | sed 's#^#mails/#;s#mails/mails/#mails/#' | sort | comm -23 - logged   # built but not logged (interrupted run)
 ```
 
 The log contains addresses; quote it to the user by line number and
@@ -93,7 +103,7 @@ status, not as a dump, unless asked.
 
 The exact message as handed to SMTP: headers (including
 `X-SES-MESSAGE-TAGS: massmailer-run=<folder>, massmailer-mail=NNNN`
-from the release after 0.1.0), text part, HTML part, inline images and
+from 0.2.0), text part, HTML part, inline images and
 attachments. Numbering is the position among non-skipped rows after
 the limit, which is also the `mail` field in `log.jsonl` and the
 `massmailer-mail` tag.

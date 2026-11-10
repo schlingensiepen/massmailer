@@ -22,9 +22,9 @@ massmailer send --limit 1 --redirect-to me@example.net -c account.json -c mailin
 - Both are also settings (`sending.limit`, `sending.redirect_to`), so
   make sure neither is accidentally left in a config file before the
   real send. `-v` shows where each comes from.
-- The SMTP connection and login happen for real: credentials must be in
-  the environment or passed as flags (`../setup/configuration.md`,
-  "Secrets").
+- The SMTP connection and login happen for real: credentials come from
+  a separate config file outside any repository, the environment, or
+  flags typed by the user (`../setup/configuration.md`, "Secrets").
 - The confirmation prompt appears as in a real send (`Send 1 mail(s)
   now? [y/N]`); the user answers it, or you pass `--yes` after the user
   asked for the test send.

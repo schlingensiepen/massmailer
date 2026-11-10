@@ -39,7 +39,8 @@ mapping and the recipients per mail (`to` field in the log).
   (`../modes/test-send.md`).
 - Deliverability: SPF/DKIM/DMARC, spam scoring, rendering in a real
   client. That is what the redirected test send is for.
-- The rate: no pause between dry-run mails.
+- The rate and the parallel connections: dry-run mails are logged one
+  after another without a pause, in mail order.
 
 ## Checklist before moving on
 

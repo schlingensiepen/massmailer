@@ -12,12 +12,12 @@ build from source.
 ## Version check
 
 ```sh
-massmailer --version        # e.g. "massmailer 0.1.0"
+massmailer --version        # e.g. "massmailer 0.2.0"
 massmailer --help           # lists the commands the binary knows
 ```
 
-If `bounces` is missing from `--help`, the binary predates the bounces
-feature; update.
+If `bounces` is missing from `--help`, the binary is older than 0.2.0;
+update.
 
 ## Install or update with the scripts
 
@@ -36,7 +36,7 @@ irm https://raw.githubusercontent.com/schlingensiepen/massmailer/main/deploy/ins
 - Installs `massmailer.exe` to `%LOCALAPPDATA%\Programs\massmailer`.
 - Adds that folder to the user PATH; a new terminal is needed before
   `massmailer` resolves.
-- `$env:MASSMAILER_INSTALL_VERSION = 'v0.1.0'` before the command pins
+- `$env:MASSMAILER_INSTALL_VERSION = 'v0.2.0'` before the command pins
   a release tag.
 
 Linux and macOS:
@@ -48,7 +48,7 @@ curl -fsSL https://raw.githubusercontent.com/schlingensiepen/massmailer/main/dep
 - Installs to `~/.local/bin/massmailer`, or to `$MASSMAILER_INSTALL_DIR`
   if set.
 - Prints a note if the directory is not on the PATH.
-- `MASSMAILER_INSTALL_VERSION=v0.1.0` pins a release tag.
+- `MASSMAILER_INSTALL_VERSION=v0.2.0` pins a release tag.
 - Supported: Linux x86_64, macOS arm64 and x86_64. Other platforms:
   build from source.
 

@@ -58,7 +58,9 @@ early and do 2-3 and 6 in parallel.
 - Which mail client most recipients use (for the test send).
 - Where configs and lists may live (a repository? then the credentials
   file goes outside it), and where run folders should be written
-  (`run.state_dir`; they contain the list).
+  (`run.state_dir`; they contain the list, and `bounces` writes
+  recipient addresses into `events.jsonl` there and into
+  `<run.state_dir>/unmatched-events.jsonl`).
 
 ## What the user has to do himself
 
@@ -67,9 +69,11 @@ early and do 2-3 and 6 in parallel.
   the console assistant from `aws-ses.md`) so the user only pastes and
   clicks.
 - Create and store credentials: SES SMTP credentials, IAM access keys.
-  Prefer that the user writes them into the credentials file directly;
-  they should not be pasted into the chat with you unless the user
-  decides so. Never put them into a file inside a repository.
+  Prefer that the user writes them into the credentials file outside
+  any repository directly, or exports them as environment variables;
+  CLI flags are the last resort (visible in the process list). They
+  should not be pasted into the chat with you unless the user decides
+  so. Never put them into a file inside a repository.
 - Answer the production access request questions in his own words
   (you may draft).
 - Give the explicit go for each real send (`../modes/send.md`).

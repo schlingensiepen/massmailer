@@ -37,9 +37,9 @@ SMTP at a limited rate (e.g. Amazon SES) and recorded in a run folder.
 It is meant for formal notices and press releases to a known list of
 recipients, not for newsletters: there is no unsubscribe mechanism.
 
-**Status:** early version (0.1). `check`, `columns`, `render` and `send`
-(with `--dry-run`, `--limit`, `--redirect-to`) work; `bounces` (Amazon
-SES events via SNS/SQS) comes with the next release.
+**Status:** early version (0.2). `check`, `columns`, `render`, `send`
+(with `--dry-run`, `--limit`, `--redirect-to`, parallel SMTP
+connections) and `bounces` (Amazon SES events via SNS/SQS) work.
 
 ## Quick start
 
@@ -49,6 +49,7 @@ massmailer render  -c mailing.json                 # .eml/.html/.txt per mail
 massmailer send --dry-run -c account.json -c mailing.json
 massmailer send --limit 5 --redirect-to me@example.org -c account.json -c mailing.json
 massmailer send -c account.json -c mailing.json    # asks before sending
+massmailer bounces -c account.json                 # next day: SES events into the run folders
 ```
 
 Every run creates a folder (`run.state_dir`, default `massmailer-runs/`)
@@ -73,6 +74,7 @@ can be set as an environment variable: `smtp.password` →
 | `smtp.host`, `smtp.port`, `smtp.security` | e.g. `email-smtp.eu-central-1.amazonaws.com`, `587`, `starttls` (or `tls`) |
 | `smtp.username`, `smtp.password` | credentials (environment or `--smtp-username`/`--smtp-password`) |
 | `sending.rate_per_second` | send rate (default 1) |
+| `sending.connections` | parallel SMTP connections (default 3, 1–10) |
 | `sending.limit`, `sending.redirect_to` | only the first N mails; deliver all to one test address |
 | `ses.configuration_set` | sets `X-SES-CONFIGURATION-SET` |
 | `sender.address`, `sender.name` | `From` |
@@ -93,7 +95,9 @@ can be set as an environment variable: `smtp.password` →
 | `recipients.to_columns`, `cc_columns`, `bcc_columns` | address columns; a cell may hold several addresses separated by `;` |
 | `recipients.skip_column` | rows with `nein`, `no`, `false` or `0` there are skipped |
 | `recipients.sheet`, `recipients.csv.delimiter` | sheet name; CSV delimiter (default: detected) |
-| `run.state_dir` | where run folders are created |
+| `run.state_dir` | where run folders are created; `bounces` matches events against the runs there |
+| `aws.sqs_queue_url`, `aws.region` | SQS queue fed by the configuration set's SNS topic; region optional if the URL host is `sqs.<region>.amazonaws.com` |
+| `aws.access_key_id`, `aws.secret_access_key` | IAM user that may read and delete from that queue (environment `MASSMAILER_AWS_…` or `--aws-access-key-id`/`--aws-secret-access-key`) |
 
 Placeholders use [MiniJinja](https://docs.rs/minijinja) syntax
 (`{{ Vorname }}`, `{% if … %}`); field names are the column headers. Values
@@ -104,9 +108,10 @@ their CSS with `<link rel="stylesheet">` or `<style>`; it is inlined.
 
 - Set `ses.configuration_set` so that SES publishes bounce and complaint
   events for the configuration set.
-- SES replaces the `Message-ID` header with its own; match bounce
-  notifications by recipient address, not by the `message_id` in
-  `log.jsonl`.
+- SES replaces the `Message-ID` header with its own. `bounces` matches
+  events by the message tags massmailer sets (`X-SES-MESSAGE-TAGS:
+  massmailer-run=…, massmailer-mail=…`), falling back to the recipient
+  address; the `message_id` in `log.jsonl` is not what SES delivers.
 - Keep `sending.rate_per_second` well below the account's maximum send
   rate.
 

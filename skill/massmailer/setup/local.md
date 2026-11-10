@@ -51,7 +51,7 @@ Rules:
 
 ## 3. Credentials
 
-Two acceptable ways, never a third:
+Three acceptable sources, in order of preference; nothing else:
 
 1. **Separate config file outside any repository**, passed as the
    **last** `-c` so it wins:
@@ -72,6 +72,12 @@ Two acceptable ways, never a third:
    `MASSMAILER_AWS_ACCESS_KEY_ID`, `MASSMAILER_AWS_SECRET_ACCESS_KEY`.
    Set them in a way that does not land in a committed file or in
    shell history (`read -s`, a secret manager, the user's profile).
+
+3. **CLI flags typed by the user** (`--smtp-username`,
+   `--smtp-password`, `--aws-access-key-id`, `--aws-secret-access-key`).
+   They are visible in the process list while the command runs and
+   tend to end up in shell history; use them only for a one-off and
+   prefer 1 or 2.
 
 The user should write the values into the file himself. If the user
 pastes a secret into the chat anyway, do not repeat it, do not put it
@@ -116,6 +122,11 @@ massmailer bounces --keep -c account.json -c ~/mailings-secrets/aws.json
 ```
 
 Checkpoint: the bounce test run's folder contains `bounces.csv` with
-one `Permanent` row. Then switch `recipients.source` to the real list,
+one `Permanent` row; the `success@` run has a `Delivery` event in its
+`events.jsonl` and no `bounces.csv`. A later `bounces` without
+`--keep` clears the queue and writes nothing twice (events are
+de-duplicated by id); after `--keep` wait for the queue's visibility
+timeout (default 30 s) before that run, or it sees an empty queue.
+Then switch `recipients.source` to the real list,
 run `columns`, `check` and `--dry-run` again, and hand over to the
 workflow in `../SKILL.md`.

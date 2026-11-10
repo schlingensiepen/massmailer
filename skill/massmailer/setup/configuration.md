@@ -24,9 +24,9 @@ command line, keep secrets out of files, and explain why a value won.
    (= `sending.limit`) and `--redirect-to` (= `sending.redirect_to`).
    The command line wins over everything.
 
-`-v` / `--verbose` prints every effective setting with its origin
-(`config <file>`, `env <NAME>` or `command line`) on stderr; secret
-values appear as `***`.
+`-v` / `--verbose` (every command) prints every effective setting with
+its origin (`config <file>`, `env <NAME>` or `command line`) on stderr;
+secret values appear as `***`.
 
 ## File format
 
@@ -66,11 +66,20 @@ are left alone. This applies to `message.body`, `message.text`,
 
 Secret keys: `smtp.username`, `smtp.password`,
 `recipients.url.bearer_token`, and for `bounces` `aws.access_key_id`,
-`aws.secret_access_key`. Supply them as environment variables or flags
-(`--smtp-username`, `--smtp-password`, `--aws-access-key-id`,
-`--aws-secret-access-key`), or as a separate config file outside any
-repository with permissions only the user can read, passed as an extra
-`-c`. Never put them in a file next to the mailing or in a repository.
+`aws.secret_access_key`. Three acceptable sources, in order of
+preference:
+
+1. a separate config file outside any repository with permissions only
+   the user can read, passed as the last `-c`;
+2. environment variables (`MASSMAILER_SMTP_PASSWORD`,
+   `MASSMAILER_AWS_SECRET_ACCESS_KEY`, …);
+3. CLI flags typed by the user (`--smtp-username`, `--smtp-password`,
+   `--aws-access-key-id`, `--aws-secret-access-key`); they are visible
+   in the process list while the command runs, so prefer 1 or 2.
+
+Never put them in a file next to the mailing or in a repository, and
+never into chat. Temporary AWS credentials with a session token are not
+supported; use a long-lived access key of a dedicated IAM user.
 
 ## Recommended split
 
@@ -102,7 +111,8 @@ SMTP settings are only read for a real send. `check`, `render` and
 
 | Key | Meaning | Default |
 |---|---|---|
-| `sending.rate_per_second` | mails per second; the gap between two sends is 1/rate, measured from the start of the previous send; minimum 0.01 | 1 |
+| `sending.rate_per_second` | mails per second: a dispatcher hands at most one mail per 1/rate seconds to the sending workers (gap measured between hand-offs); minimum 0.01 | 1 |
+| `sending.connections` | parallel SMTP connections (worker threads over a connection pool), 1–10; the rate limit applies across all of them. For a provider limit of 1 mail/s set `rate_per_second` to 1, connections may stay | 3 |
 | `sending.limit` | build and send only the first N rows (after skipping); `--limit N` | all |
 | `sending.redirect_to` | deliver every mail to this one address, with the test subject prefix; `--redirect-to ADDR` | – |
 | `ses.configuration_set` | value of the `X-SES-CONFIGURATION-SET` header (Amazon SES) | – |
@@ -161,10 +171,13 @@ SMTP settings are only read for a real send. `check`, `render` and
 
 | Key | Meaning | Default |
 |---|---|---|
-| `aws.region` | region of the SQS queue, e.g. `eu-north-1` | – |
-| `aws.sqs_queue_url` | URL of the queue fed by the configuration set's SNS topic | – |
-| `aws.access_key_id` | IAM key (secret); `MASSMAILER_AWS_ACCESS_KEY_ID` or `--aws-access-key-id` | – |
-| `aws.secret_access_key` | IAM secret (secret); `MASSMAILER_AWS_SECRET_ACCESS_KEY` or `--aws-secret-access-key` | – |
+| `aws.sqs_queue_url` | URL of the queue fed by the configuration set's SNS topic, `https://sqs.<region>.amazonaws.com/<account>/<queue>` | – |
+| `aws.region` | region of the queue, e.g. `eu-north-1` | taken from the queue URL when its host is `sqs.<region>.amazonaws.com`; required otherwise |
+| `aws.access_key_id` | IAM access key (secret); `MASSMAILER_AWS_ACCESS_KEY_ID` or `--aws-access-key-id` | – |
+| `aws.secret_access_key` | IAM secret key (secret); `MASSMAILER_AWS_SECRET_ACCESS_KEY` or `--aws-secret-access-key`; no session tokens | – |
+
+`bounces` calls only `sqs:ReceiveMessage` and `sqs:DeleteMessage` on
+that queue.
 
 ## Minimal working pair
 
