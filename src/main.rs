@@ -57,8 +57,8 @@ enum Command {
         /// Leave the messages in the queue (for testing)
         #[arg(long)]
         keep: bool,
-        /// Long-poll seconds per request (0-20)
-        #[arg(long, default_value_t = 5)]
+        /// Long-poll seconds per request (1-20)
+        #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u32).range(1..=20))]
         wait: u32,
         /// AWS access key id (or MASSMAILER_AWS_ACCESS_KEY_ID)
         #[arg(long)]
@@ -130,6 +130,11 @@ fn real_main(cli: Cli) -> anyhow::Result<()> {
         anyhow::bail!("no --config given");
     }
     let settings = Settings::load(&cli.configs, &overrides)?;
+    if cli.verbose {
+        for l in settings.describe() {
+            eprintln!("  {l}");
+        }
+    }
     if let Command::Columns = cli.command {
         return run::columns(&settings);
     }

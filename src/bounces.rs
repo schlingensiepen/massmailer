@@ -42,6 +42,8 @@ pub struct Event {
     pub recipients: Vec<Recipient>,
     pub time: String,
     pub tags: HashMap<String, String>,
+    /// SNS MessageId of the notification (empty with raw message delivery)
+    pub id: String,
     pub raw: Value,
 }
 
@@ -79,6 +81,11 @@ fn addresses(list: &Value, field: Option<&str>) -> Vec<Recipient> {
 /// event, or (raw message delivery) the SES event itself.
 pub fn parse_event(body: &str) -> Result<Event> {
     let outer: Value = serde_json::from_str(body).context("queue message is not JSON")?;
+    let id = if outer.get("Message").is_some() {
+        outer["MessageId"].as_str().unwrap_or_default().to_string()
+    } else {
+        String::new()
+    };
     let ev: Value = match outer.get("Message").and_then(Value::as_str) {
         Some(m) => serde_json::from_str(m).context("SNS Message is not JSON")?,
         None => outer,
@@ -89,7 +96,7 @@ pub fn parse_event(body: &str) -> Result<Event> {
         .unwrap_or("other")
         .to_string();
     let destination = addresses(&ev["mail"]["destination"], None);
-    let (kind_type, subtype, recipients, time) = match kind.as_str() {
+    let (kind_type, subtype, mut recipients, time) = match kind.as_str() {
         "Bounce" => (
             s(&ev, &["bounce", "bounceType"]),
             s(&ev, &["bounce", "bounceSubType"]),
@@ -123,16 +130,20 @@ pub fn parse_event(body: &str) -> Result<Event> {
         "Reject" => (
             s(&ev, &["reject", "reason"]),
             String::new(),
-            destination,
+            destination.clone(),
             s(&ev, &["mail", "timestamp"]),
         ),
         _ => (
             String::new(),
             String::new(),
-            destination,
+            destination.clone(),
             s(&ev, &["mail", "timestamp"]),
         ),
     };
+    // e.g. complaints without complainedRecipients
+    if recipients.is_empty() {
+        recipients = destination;
+    }
     let mut tags = HashMap::new();
     if let Some(t) = ev["mail"]["tags"].as_object() {
         for (k, v) in t {
@@ -148,6 +159,7 @@ pub fn parse_event(body: &str) -> Result<Event> {
         recipients,
         time,
         tags,
+        id,
         raw: ev,
     })
 }
@@ -197,7 +209,12 @@ fn load_runs(state_dir: &Path) -> Result<Vec<Run>> {
                 mail: mail.clone(),
                 line: v["line"].as_u64().unwrap_or_default(),
             };
-            for a in v["to"].as_str().unwrap_or_default().split(',') {
+            let all = ["to", "cc", "bcc"]
+                .iter()
+                .map(|k| v[*k].as_str().unwrap_or_default())
+                .collect::<Vec<_>>()
+                .join(",");
+            for a in all.split(',') {
                 let a = a.trim().to_lowercase();
                 if !a.is_empty() {
                     by_address.insert(a, sent.clone());
@@ -249,18 +266,30 @@ fn append(path: &Path, line: &str) -> Result<()> {
 }
 
 fn csv_field(v: &str) -> String {
+    // text from remote servers: keep spreadsheets from evaluating it
+    let v = if v.starts_with(['=', '+', '-', '@']) {
+        format!("'{v}")
+    } else {
+        v.to_string()
+    };
     if v.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", v.replace('"', "\"\""))
     } else {
-        v.to_string()
+        v
     }
+}
+
+/// Event kinds that go into bounces.csv (addresses to correct or remove).
+fn in_csv(kind: &str) -> bool {
+    matches!(kind, "Bounce" | "Complaint" | "Reject")
 }
 
 const CSV_HEADER: &str = "mail,line,address,event,type,subtype,diagnostic,time";
 
-/// Writes one event into its run folder(s) or the unmatched file. Returns the
-/// run folders it was written to (empty: unmatched).
-fn record(state_dir: &Path, runs: &[Run], ev: &Event) -> Result<Vec<PathBuf>> {
+/// Writes one event into its run folder(s) and, if some recipient matches no
+/// run, into the unmatched file. Returns the run folders it was written to
+/// and whether it went to the unmatched file.
+fn record(state_dir: &Path, runs: &[Run], ev: &Event, id: &str) -> Result<(Vec<PathBuf>, bool)> {
     // group recipients by run
     let mut per_run: BTreeMap<usize, Vec<(&Recipient, Option<&Sent>)>> = BTreeMap::new();
     let mut unmatched = Vec::new();
@@ -271,8 +300,9 @@ fn record(state_dir: &Path, runs: &[Run], ev: &Event) -> Result<Vec<PathBuf>> {
         }
     }
     let received = chrono::Local::now().to_rfc3339();
-    if per_run.is_empty() || !unmatched.is_empty() {
-        let entry = json!({"received": received, "event": ev.kind, "raw": ev.raw});
+    let to_unmatched = per_run.is_empty() || !unmatched.is_empty();
+    if to_unmatched {
+        let entry = json!({"received": received, "id": id, "event": ev.kind, "raw": ev.raw});
         append(
             &state_dir.join("unmatched-events.jsonl"),
             &entry.to_string(),
@@ -281,9 +311,9 @@ fn record(state_dir: &Path, runs: &[Run], ev: &Event) -> Result<Vec<PathBuf>> {
     let mut written = Vec::new();
     for (i, list) in per_run {
         let dir = &runs[i].dir;
-        let entry = json!({"received": received, "event": ev.kind, "raw": ev.raw});
+        let entry = json!({"received": received, "id": id, "event": ev.kind, "raw": ev.raw});
         append(&dir.join("events.jsonl"), &entry.to_string())?;
-        if ev.kind != "Delivery" {
+        if in_csv(&ev.kind) {
             let csv = dir.join("bounces.csv");
             if !csv.exists() {
                 append(&csv, CSV_HEADER)?;
@@ -308,7 +338,28 @@ fn record(state_dir: &Path, runs: &[Run], ev: &Event) -> Result<Vec<PathBuf>> {
         }
         written.push(dir.clone());
     }
-    Ok(written)
+    Ok((written, to_unmatched))
+}
+
+/// Ids of events already recorded (run folders and unmatched file).
+fn known_ids(state_dir: &Path, runs: &[Run]) -> std::collections::HashSet<String> {
+    let mut files: Vec<PathBuf> = runs.iter().map(|r| r.dir.join("events.jsonl")).collect();
+    files.push(state_dir.join("unmatched-events.jsonl"));
+    let mut ids = std::collections::HashSet::new();
+    for f in files {
+        let Ok(text) = fs::read_to_string(&f) else {
+            continue;
+        };
+        for l in text.lines() {
+            if let Ok(v) = serde_json::from_str::<Value>(l)
+                && let Some(id) = v["id"].as_str()
+                && !id.is_empty()
+            {
+                ids.insert(id.to_string());
+            }
+        }
+    }
+    ids
 }
 
 /// Minimal SQS client (AWS JSON 1.0 protocol, SigV4) on top of ureq.
@@ -419,7 +470,8 @@ impl Sqs {
         serde_json::from_str(&text).with_context(|| format!("SQS {action}: response is not JSON"))
     }
 
-    fn receive(&self, wait: u32) -> Result<Vec<(String, String)>> {
+    /// (SQS MessageId, receipt handle, body)
+    fn receive(&self, wait: u32) -> Result<Vec<(String, String, String)>> {
         let v = self.call(
             "ReceiveMessage",
             &json!({
@@ -434,6 +486,7 @@ impl Sqs {
                 a.iter()
                     .filter_map(|m| {
                         Some((
+                            m["MessageId"].as_str().unwrap_or_default().to_string(),
                             m["ReceiptHandle"].as_str()?.to_string(),
                             m["Body"].as_str()?.to_string(),
                         ))
@@ -463,39 +516,59 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
     let sqs = Sqs::new(s)?;
     let mut per_kind: BTreeMap<String, usize> = BTreeMap::new();
     let mut per_run: BTreeMap<String, usize> = BTreeMap::new();
-    let (mut total, mut unmatched, mut unreadable) = (0, 0, 0);
+    let (mut total, mut unmatched, mut unreadable, mut duplicates) = (0, 0, 0, 0);
+    // events already recorded earlier (e.g. after a run with --keep, or a
+    // crash between writing and deleting): not written again
+    let mut known = known_ids(&state_dir, &runs);
     // with --keep, received messages become visible again after the
-    // visibility timeout; stop at the first message seen twice
+    // visibility timeout: stop when a whole batch was seen in this call
     let mut seen = std::collections::HashSet::new();
-    'outer: loop {
+    loop {
         let batch = sqs.receive(opt.wait)?;
         if batch.is_empty() {
             break;
         }
-        for (receipt, body) in batch {
-            if !seen.insert(body.clone()) {
-                break 'outer;
+        let mut new_in_batch = 0;
+        for (sqs_id, receipt, body) in batch {
+            if !seen.insert(sqs_id.clone()) {
+                // redelivered within this call
+                if !opt.keep {
+                    sqs.delete(&receipt)?;
+                }
+                continue;
             }
+            new_in_batch += 1;
             total += 1;
             match parse_event(&body) {
                 Ok(ev) => {
-                    let written = record(&state_dir, &runs, &ev)?;
-                    *per_kind.entry(ev.kind.clone()).or_default() += 1;
-                    if written.is_empty() {
-                        unmatched += 1;
-                    }
-                    for d in written {
-                        let name = d
-                            .file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_default();
-                        *per_run.entry(name).or_default() += 1;
+                    let id = if ev.id.is_empty() {
+                        sqs_id
+                    } else {
+                        ev.id.clone()
+                    };
+                    if !id.is_empty() && known.contains(&id) {
+                        duplicates += 1;
+                    } else {
+                        let (written, to_unmatched) = record(&state_dir, &runs, &ev, &id)?;
+                        known.insert(id);
+                        *per_kind.entry(ev.kind.clone()).or_default() += 1;
+                        if to_unmatched {
+                            unmatched += 1;
+                        }
+                        for d in written {
+                            let name = d
+                                .file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_default();
+                            *per_run.entry(name).or_default() += 1;
+                        }
                     }
                 }
                 Err(e) => {
                     unreadable += 1;
                     let entry = json!({
                         "received": chrono::Local::now().to_rfc3339(),
+                        "id": sqs_id,
                         "event": "unreadable",
                         "error": format!("{e:#}"),
                         "body": body,
@@ -510,6 +583,9 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
                 sqs.delete(&receipt)?;
             }
         }
+        if new_in_batch == 0 {
+            break;
+        }
     }
     eprintln!(
         "{total} message(s) from the queue{}",
@@ -520,6 +596,9 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
     }
     for (r, n) in &per_run {
         eprintln!("  run {r}: {n} event(s)");
+    }
+    if duplicates > 0 {
+        eprintln!("  {duplicates} already recorded earlier, not written again");
     }
     if unmatched + unreadable > 0 {
         eprintln!(
@@ -600,7 +679,7 @@ mod tests {
         let (i, _) = find(&runs, &ev, "anna@example.org").unwrap();
         assert!(runs[i].dir.ends_with("20261101-100000-send"));
         // record writes CSV into the run
-        record(&base, &runs, &ev).unwrap();
+        record(&base, &runs, &ev, "id-1").unwrap();
         let csv = fs::read_to_string(base.join("20261101-100000-send/bounces.csv")).unwrap();
         assert!(csv.starts_with(CSV_HEADER));
         assert!(csv.contains("0001,2,anna@example.org,Bounce,Transient"));
@@ -609,7 +688,45 @@ mod tests {
             &json!({"eventType": "Bounce", "bounce": {"bouncedRecipients": [{"emailAddress": "x@example.net"}]}, "mail": {}}).to_string(),
         )
         .unwrap();
-        assert!(record(&base, &runs, &ev2).unwrap().is_empty());
+        assert!(record(&base, &runs, &ev2, "id-2").unwrap().0.is_empty());
         assert!(base.join("unmatched-events.jsonl").exists());
+    }
+
+    #[test]
+    fn csv_only_for_actionable_events_and_dedupe() {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-runs/bounces-csv");
+        let _ = fs::remove_dir_all(&base);
+        let d = base.join("20261110-150000-send");
+        fs::create_dir_all(&d).unwrap();
+        let l = json!({"mail": "mails/0001.eml", "line": 2, "to": "a@example.org", "cc": "c@example.org", "status": "sent"});
+        fs::write(d.join("log.jsonl"), format!("{l}\n")).unwrap();
+        let runs = load_runs(&base).unwrap();
+        // DeliveryDelay: events.jsonl only
+        let delay = parse_event(
+            &json!({"eventType": "DeliveryDelay", "deliveryDelay": {"delayType": "MailboxFull", "delayedRecipients": [{"emailAddress": "a@example.org"}]}, "mail": {}}).to_string(),
+        )
+        .unwrap();
+        record(&base, &runs, &delay, "d1").unwrap();
+        assert!(!d.join("bounces.csv").exists());
+        // complaint without complainedRecipients falls back to destination; Cc matches
+        let c = parse_event(
+            &sns(&json!({"eventType": "Complaint", "complaint": {"complaintFeedbackType": "=cmd"}, "mail": {"destination": ["c@example.org"]}})),
+        )
+        .unwrap();
+        assert_eq!(c.recipients[0].address, "c@example.org");
+        let (written, unmatched) = record(&base, &runs, &c, "c1").unwrap();
+        assert_eq!(written.len(), 1);
+        assert!(!unmatched);
+        let csv = fs::read_to_string(d.join("bounces.csv")).unwrap();
+        assert!(csv.contains("c@example.org,Complaint,'=cmd"), "{csv}");
+        // ids recorded earlier are known
+        let ids = known_ids(&base, &runs);
+        assert!(ids.contains("d1") && ids.contains("c1"));
+    }
+
+    #[test]
+    fn sns_message_id_is_the_event_id() {
+        let body = json!({"Type": "Notification", "MessageId": "sns-1", "Message": json!({"eventType": "Delivery", "delivery": {"recipients": ["a@example.org"]}, "mail": {}}).to_string()}).to_string();
+        assert_eq!(parse_event(&body).unwrap().id, "sns-1");
     }
 }

@@ -1,9 +1,9 @@
 //! One run: run folder, recipients, rendering, sending (or dry run).
 
-use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
 
@@ -36,6 +36,13 @@ pub struct Options {
     pub mode: Mode,
     pub yes: bool,
     pub verbose: bool,
+}
+
+fn join_emails(list: &[Mailbox]) -> String {
+    list.iter()
+        .map(|m| m.email.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn mailbox(address: &str, name: Option<String>) -> Result<Mailbox> {
@@ -128,11 +135,6 @@ fn confirm(question: &str) -> Result<bool> {
 pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
     let dir = run_dir(s, opt.mode)?;
     eprintln!("run folder: {}", dir.display());
-    if opt.verbose {
-        for l in s.describe() {
-            eprintln!("  {l}");
-        }
-    }
     let mut fetcher = Fetcher::new(
         &dir,
         s.num("fetch.timeout_seconds")?.unwrap_or(30.0),
@@ -257,6 +259,8 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
     struct Prepared {
         line: usize,
         to: String,
+        cc: String,
+        bcc: String,
         message: lettre::Message,
         bytes: usize,
         attachments: Vec<(String, String)>,
@@ -382,6 +386,8 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
                 .map(|m| m.email.to_string())
                 .collect::<Vec<_>>()
                 .join(", "),
+            cc: join_emails(&addr.cc),
+            bcc: join_emails(&addr.bcc),
             message,
             bytes: raw.len(),
             attachments: att_log,
@@ -404,6 +410,11 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
         },
     );
     if matches!(opt.mode, Mode::Check | Mode::Render) {
+        return Ok(());
+    }
+    if prepared.is_empty() {
+        File::create(dir.join("log.jsonl"))?;
+        eprintln!("nothing to send");
         return Ok(());
     }
 
@@ -453,8 +464,8 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
     let (mut ok, mut failed) = (0, 0);
     let total = prepared.len();
     let dry = opt.mode == Mode::DryRun;
-    // writes the log line and progress of mail i (called in mail order)
-    let mut record = |i: usize, result: Result<String, String>| -> Result<()> {
+    // writes the log line and progress of mail i (in completion order)
+    let mut record = |i: usize, time: String, result: Result<String, String>| -> Result<()> {
         let p = &prepared[i];
         let message_id = p
             .message
@@ -473,8 +484,8 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
             }
         };
         let status = if dry { "dry-run" } else { status };
-        let entry = json!({
-            "time": chrono::Local::now().to_rfc3339(),
+        let mut entry = json!({
+            "time": time,
             "mail": format!("mails/{:04}.eml", i + 1),
             "line": p.line,
             "to": p.to,
@@ -484,26 +495,36 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
             "status": status,
             "detail": detail,
         });
+        if !p.cc.is_empty() {
+            entry["cc"] = json!(p.cc);
+        }
+        if !p.bcc.is_empty() {
+            entry["bcc"] = json!(p.bcc);
+        }
         writeln!(log, "{entry}")?;
+        log.flush()?;
         eprintln!("{:>4}/{total} {status} {}", i + 1, p.to);
         Ok(())
     };
+    let now = || chrono::Local::now().to_rfc3339();
     match &transport {
         None => {
             for i in 0..total {
-                record(i, Ok("dry run, not sent".to_string()))?;
+                record(i, now(), Ok("dry run, not sent".to_string()))?;
             }
         }
         Some(t) => {
             // A dispatcher releases one mail per `gap`; `connections` workers
-            // send over pooled SMTP connections; results are logged in order.
+            // send over pooled SMTP connections. Each result is logged as soon
+            // as it arrives, so the log never lags behind what was sent.
             let (job_tx, job_rx) = mpsc::sync_channel::<usize>(0);
             let job_rx = Mutex::new(job_rx);
-            let (res_tx, res_rx) = mpsc::channel::<(usize, Result<String, String>)>();
+            let (res_tx, res_rx) = mpsc::channel::<(usize, String, Result<String, String>)>();
+            let abort = AtomicBool::new(false);
             let prepared = &prepared;
             let mut write_error = None;
             std::thread::scope(|sc| {
-                for _ in 0..connections.min(total.max(1)) {
+                for _ in 0..connections.min(total) {
                     let res_tx = res_tx.clone();
                     let job_rx = &job_rx;
                     sc.spawn(move || {
@@ -514,13 +535,14 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
                                 .send(&prepared[i].message)
                                 .map(|r| r.message().collect::<Vec<_>>().join(" "))
                                 .map_err(|e| e.to_string());
-                            if res_tx.send((i, r)).is_err() {
+                            if res_tx.send((i, now(), r)).is_err() {
                                 break;
                             }
                         }
                     });
                 }
                 drop(res_tx);
+                let abort = &abort;
                 sc.spawn(move || {
                     let mut last: Option<Instant> = None;
                     for i in 0..total {
@@ -529,29 +551,29 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
                         {
                             std::thread::sleep(rest);
                         }
+                        if abort.load(Ordering::SeqCst) {
+                            break;
+                        }
                         // blocks until a worker is free
                         if job_tx.send(i).is_err() {
                             break;
                         }
                         last = Some(Instant::now());
                     }
+                    // dropping job_tx ends the workers
                 });
-                let mut pending = BTreeMap::new();
-                let mut next = 0;
-                for (i, r) in res_rx {
-                    pending.insert(i, r);
-                    while let Some(r) = pending.remove(&next) {
-                        if write_error.is_none()
-                            && let Err(e) = record(next, r)
-                        {
-                            write_error = Some(e);
-                        }
-                        next += 1;
+                for (i, time, r) in res_rx {
+                    if write_error.is_none()
+                        && let Err(e) = record(i, time, r)
+                    {
+                        // stop releasing further mails; in-flight ones finish
+                        abort.store(true, Ordering::SeqCst);
+                        write_error = Some(e);
                     }
                 }
             });
             if let Some(e) = write_error {
-                return Err(e);
+                return Err(e).context("cannot write log.jsonl; sending stopped");
             }
         }
     }
