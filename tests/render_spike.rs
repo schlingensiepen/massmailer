@@ -53,6 +53,8 @@ fn render_example() {
     assert!(r1.html.contains("<em>Kassenwartin</em>"));
     assert!(r1.text.starts_with("PC-Freunde-Fulda e.V.\n"));
     assert!(r1.text.contains("Einladung zum Jahrestreffen\n===="));
+    assert!(r1.html.contains("Viele Grüße<br>\nDer Vorstand"), "hard break: {}", r1.html);
+    assert!(r1.text.contains("Viele Grüße\nDer Vorstand"));
     assert!(r1.html.contains("style=\""), "css not inlined");
     assert!(!r1.html.contains("<style"));
     let raw1 = String::from_utf8(m1.formatted()).unwrap();

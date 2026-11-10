@@ -13,5 +13,5 @@ Als *{{ funktion }}* bitten wir dich, einen kurzen Bericht vorzubereiten.
 
 Mehr unter <https://example.org/treffen>.
 
-Viele Grüße
+Viele Grüße\
 Der Vorstand
