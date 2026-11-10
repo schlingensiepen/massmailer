@@ -87,7 +87,22 @@ pub fn parse_event(body: &str) -> Result<Event> {
         String::new()
     };
     let ev: Value = match outer.get("Message").and_then(Value::as_str) {
-        Some(m) => serde_json::from_str(m).context("SNS Message is not JSON")?,
+        Some(m) => match serde_json::from_str(m) {
+            Ok(v) => v,
+            // SNS/SES notices such as "Successfully validated SNS topic …"
+            Err(_) => {
+                return Ok(Event {
+                    kind: "notice".into(),
+                    kind_type: String::new(),
+                    subtype: String::new(),
+                    recipients: Vec::new(),
+                    time: outer["Timestamp"].as_str().unwrap_or_default().to_string(),
+                    tags: HashMap::new(),
+                    id,
+                    raw: outer,
+                });
+            }
+        },
         None => outer,
     };
     let kind = ev["eventType"]
@@ -516,7 +531,7 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
     let sqs = Sqs::new(s)?;
     let mut per_kind: BTreeMap<String, usize> = BTreeMap::new();
     let mut per_run: BTreeMap<String, usize> = BTreeMap::new();
-    let (mut total, mut unmatched, mut unreadable, mut duplicates) = (0, 0, 0, 0);
+    let (mut total, mut unmatched, mut unreadable, mut duplicates, mut notices) = (0, 0, 0, 0, 0);
     // events already recorded earlier (e.g. after a run with --keep, or a
     // crash between writing and deleting): not written again
     let mut known = known_ids(&state_dir, &runs);
@@ -540,6 +555,10 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
             new_in_batch += 1;
             total += 1;
             match parse_event(&body) {
+                Ok(ev) if ev.kind == "notice" => {
+                    // not an SES event; nothing to record
+                    notices += 1;
+                }
                 Ok(ev) => {
                     let id = if ev.id.is_empty() {
                         sqs_id
@@ -564,8 +583,10 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
                         }
                     }
                 }
+                Err(_) if known.contains(&sqs_id) => duplicates += 1,
                 Err(e) => {
                     unreadable += 1;
+                    known.insert(sqs_id.clone());
                     let entry = json!({
                         "received": chrono::Local::now().to_rfc3339(),
                         "id": sqs_id,
@@ -596,6 +617,9 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
     }
     for (r, n) in &per_run {
         eprintln!("  run {r}: {n} event(s)");
+    }
+    if notices > 0 {
+        eprintln!("  {notices} SNS notice(s) without SES event (e.g. topic validation), ignored");
     }
     if duplicates > 0 {
         eprintln!("  {duplicates} already recorded earlier, not written again");
@@ -728,5 +752,13 @@ mod tests {
     fn sns_message_id_is_the_event_id() {
         let body = json!({"Type": "Notification", "MessageId": "sns-1", "Message": json!({"eventType": "Delivery", "delivery": {"recipients": ["a@example.org"]}, "mail": {}}).to_string()}).to_string();
         assert_eq!(parse_event(&body).unwrap().id, "sns-1");
+    }
+
+    #[test]
+    fn sns_notice_is_not_an_error() {
+        let body = json!({"Type": "Notification", "MessageId": "n1", "Message": "Successfully validated SNS topic for Amazon SES event publishing."}).to_string();
+        let ev = parse_event(&body).unwrap();
+        assert_eq!(ev.kind, "notice");
+        assert!(ev.recipients.is_empty());
     }
 }

@@ -26,9 +26,10 @@ kinds of SES SMTP endpoints fit:
    after creation, the credentials are those configured in the
    endpoint's authentication settings. Same massmailer settings,
    different host, port and secret. This path was verified in one real
-   setup (mails delivered, DKIM and DMARC pass); whether
-   configuration-set events (bounces) arrive through it has not been
-   confirmed yet. Check the details against the current AWS
+   setup: mails delivered, DKIM and DMARC pass, and the
+   `X-SES-CONFIGURATION-SET` and `X-SES-MESSAGE-TAGS` headers take
+   effect (bounce and complaint events with the tags arrived in the
+   queue). Check the details against the current AWS
    documentation and console; Mail Manager bills per message on top of
    SES.
 

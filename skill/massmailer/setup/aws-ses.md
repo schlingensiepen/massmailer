@@ -138,8 +138,8 @@ sender, and a rule set with a rule whose action is "Send to internet"
 (outbound) for mail from the user's identity. The endpoint's host name
 is shown after creation; port and credentials as configured there.
 This path was verified in one real setup (mails delivered, DKIM and
-DMARC pass); whether configuration-set events for `bounces` arrive
-through it has not been confirmed yet. Check every detail against the
+DMARC pass; configuration-set events with the message tags arrived in
+the queue). Check every detail against the
 current AWS documentation and the console.
 
 Prompt:
