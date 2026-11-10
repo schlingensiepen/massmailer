@@ -2,6 +2,9 @@
 name = "massmailer"
 version = "0.1.0"
 edition = "2024"
+license = "Apache-2.0"
+description = "Mass mailer: Markdown template plus recipient list to letterhead mails via SMTP"
+repository = "https://github.com/schlingensiepen/massmailer"
 
 [dependencies]
 anyhow = "1.0.104"

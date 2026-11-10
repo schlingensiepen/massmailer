@@ -15,9 +15,9 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use comrak::nodes::{ListType, NodeValue};
 use comrak::{Arena, Options, format_html, parse_document};
+use lettre::Message;
 use lettre::message::header::ContentType;
 use lettre::message::{Attachment, Mailbox, MultiPart, SinglePart};
-use lettre::Message;
 use minijinja::{Environment, ErrorKind, UndefinedBehavior, Value};
 
 /// Content ID under which the logo is referenced in `layout.html` (`cid:logo`).
@@ -40,11 +40,19 @@ impl Letterhead {
         let layout_html = read("layout.html")?;
         let layout_txt = read("layout.txt")?;
         for (name, body) in [("layout.html", &layout_html), ("layout.txt", &layout_txt)] {
-            anyhow::ensure!(body.contains("{{ content }}"), "letterhead: {name} lacks {{{{ content }}}}");
+            anyhow::ensure!(
+                body.contains("{{ content }}"),
+                "letterhead: {name} lacks {{{{ content }}}}"
+            );
         }
         let css = fs::read_to_string(dir.join("style.css")).unwrap_or_default();
         let logo_png = fs::read(dir.join("logo.png")).ok();
-        Ok(Self { layout_html, layout_txt, css, logo_png })
+        Ok(Self {
+            layout_html,
+            layout_txt,
+            css,
+            logo_png,
+        })
     }
 }
 
@@ -73,7 +81,11 @@ pub fn fill_template(template: &str, values: &BTreeMap<String, String>) -> Resul
     let mut env = Environment::new();
     env.set_undefined_behavior(UndefinedBehavior::Strict);
     env.set_formatter(|out, _state, value| {
-        let s = if value.is_safe() { value.to_string() } else { escape_markdown(&value.to_string()) };
+        let s = if value.is_safe() {
+            value.to_string()
+        } else {
+            escape_markdown(&value.to_string())
+        };
         out.write_str(&s)
             .map_err(|_| minijinja::Error::new(ErrorKind::WriteFailure, "write failed"))
     });
@@ -207,7 +219,15 @@ fn inline_into<'a>(node: &'a comrak::nodes::AstNode<'a>, s: &mut String) {
             }
         }
         NodeValue::Image(img) => {
-            let _ = write!(s, "[{}]", if img.title.is_empty() { inline_text(node) } else { img.title.clone() });
+            let _ = write!(
+                s,
+                "[{}]",
+                if img.title.is_empty() {
+                    inline_text(node)
+                } else {
+                    img.title.clone()
+                }
+            );
         }
         NodeValue::HtmlInline(_) => {}
         _ => {
@@ -225,10 +245,12 @@ pub fn frame(html_body: &str, text_body: &str, lh: &Letterhead) -> Result<Render
     // ".html" enables HTML auto-escaping; the body is passed as safe.
     env.add_template("layout.html", &lh.layout_html)?;
     env.add_template("layout.txt", &lh.layout_txt)?;
-    let html = env
-        .get_template("layout.html")?
-        .render(minijinja::context! { content => Value::from_safe_string(html_body.to_string()) })?;
-    let text = env.get_template("layout.txt")?.render(minijinja::context! { content => text_body })?;
+    let html = env.get_template("layout.html")?.render(
+        minijinja::context! { content => Value::from_safe_string(html_body.to_string()) },
+    )?;
+    let text = env
+        .get_template("layout.txt")?
+        .render(minijinja::context! { content => text_body })?;
 
     let inliner = css_inline::CSSInliner::options()
         .extra_css(Some(lh.css.clone().into()))
@@ -238,7 +260,11 @@ pub fn frame(html_body: &str, text_body: &str, lh: &Letterhead) -> Result<Render
 }
 
 /// Steps 1–4 for one recipient.
-pub fn render(template: &str, values: &BTreeMap<String, String>, lh: &Letterhead) -> Result<Rendered> {
+pub fn render(
+    template: &str,
+    values: &BTreeMap<String, String>,
+    lh: &Letterhead,
+) -> Result<Rendered> {
     let md = fill_template(template, values)?;
     let (html, text) = markdown_to_parts(&md)?;
     frame(&html, &text, lh)
@@ -257,12 +283,21 @@ pub fn parse_address_cell(cell: &str) -> Result<Vec<Mailbox>> {
     cell.split(';')
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(|s| s.parse::<Mailbox>().with_context(|| format!("invalid address: {s}")))
+        .map(|s| {
+            s.parse::<Mailbox>()
+                .with_context(|| format!("invalid address: {s}"))
+        })
         .collect()
 }
 
 /// Step 5: MIME message.
-pub fn build_message(from: Mailbox, addr: &Addresses, subject: &str, r: &Rendered, lh: &Letterhead) -> Result<Message> {
+pub fn build_message(
+    from: Mailbox,
+    addr: &Addresses,
+    subject: &str,
+    r: &Rendered,
+    lh: &Letterhead,
+) -> Result<Message> {
     anyhow::ensure!(!addr.to.is_empty(), "row has no To address");
     let mut b = Message::builder().from(from).subject(subject);
     for m in &addr.to {
@@ -277,7 +312,8 @@ pub fn build_message(from: Mailbox, addr: &Addresses, subject: &str, r: &Rendere
     let html_part = SinglePart::html(r.html.clone());
     let html = match &lh.logo_png {
         Some(png) => MultiPart::related().singlepart(html_part).singlepart(
-            Attachment::new_inline(LOGO_CID.to_string()).body(png.clone(), ContentType::parse("image/png")?),
+            Attachment::new_inline(LOGO_CID.to_string())
+                .body(png.clone(), ContentType::parse("image/png")?),
         ),
         None => MultiPart::related().singlepart(html_part),
     };

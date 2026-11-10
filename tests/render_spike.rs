@@ -27,16 +27,26 @@ fn render_example() {
     let mut results = Vec::new();
     for (n, row) in rdr.records().enumerate() {
         let row = row.unwrap();
-        let values: BTreeMap<String, String> =
-            headers.iter().zip(row.iter()).map(|(h, v)| (h.to_string(), v.to_string())).collect();
+        let values: BTreeMap<String, String> = headers
+            .iter()
+            .zip(row.iter())
+            .map(|(h, v)| (h.to_string(), v.to_string()))
+            .collect();
         let cells = |cols: &[&str]| -> Vec<_> {
-            cols.iter().flat_map(|c| render::parse_address_cell(&values[*c]).unwrap()).collect()
+            cols.iter()
+                .flat_map(|c| render::parse_address_cell(&values[*c]).unwrap())
+                .collect()
         };
-        let addr = Addresses { to: cells(TO_COLUMNS), cc: cells(CC_COLUMNS), bcc: vec![] };
+        let addr = Addresses {
+            to: cells(TO_COLUMNS),
+            cc: cells(CC_COLUMNS),
+            bcc: vec![],
+        };
 
         let r = render::render(&template, &values, &lh).unwrap();
         let from = "PC-Freunde-Fulda <vorstand@example.org>".parse().unwrap();
-        let msg = render::build_message(from, &addr, "Einladung zum Jahrestreffen", &r, &lh).unwrap();
+        let msg =
+            render::build_message(from, &addr, "Einladung zum Jahrestreffen", &r, &lh).unwrap();
         fs::write(out.join(format!("{}.eml", n + 1)), msg.formatted()).unwrap();
         fs::write(out.join(format!("{}.html", n + 1)), &r.html).unwrap();
         fs::write(out.join(format!("{}.txt", n + 1)), &r.text).unwrap();
@@ -48,12 +58,20 @@ fn render_example() {
     let (r1, m1) = &results[0];
     assert!(r1.html.contains("Anna_Maria *Stern*"), "html: {}", r1.html);
     assert!(!r1.html.contains("<em>Stern</em>"));
-    assert!(r1.text.contains("Hallo Anna_Maria *Stern*,"), "text: {}", r1.text);
+    assert!(
+        r1.text.contains("Hallo Anna_Maria *Stern*,"),
+        "text: {}",
+        r1.text
+    );
     assert!(r1.text.contains("Als Kassenwartin bitten"));
     assert!(r1.html.contains("<em>Kassenwartin</em>"));
     assert!(r1.text.starts_with("PC-Freunde-Fulda e.V.\n"));
     assert!(r1.text.contains("Einladung zum Jahrestreffen\n===="));
-    assert!(r1.html.contains("Viele Grüße<br>\nDer Vorstand"), "hard break: {}", r1.html);
+    assert!(
+        r1.html.contains("Viele Grüße<br>\nDer Vorstand"),
+        "hard break: {}",
+        r1.html
+    );
     assert!(r1.text.contains("Viele Grüße\nDer Vorstand"));
     assert!(r1.html.contains("style=\""), "css not inlined");
     assert!(!r1.html.contains("<style"));
@@ -64,7 +82,11 @@ fn render_example() {
 
     // Row 2: HTML in a value is escaped, condition false, two Cc from one cell.
     let (r2, m2) = &results[1];
-    assert!(r2.html.contains("&lt;b&gt;Meier&lt;/b&gt;"), "html: {}", r2.html);
+    assert!(
+        r2.html.contains("&lt;b&gt;Meier&lt;/b&gt;"),
+        "html: {}",
+        r2.html
+    );
     assert!(!r2.html.contains("<b>Meier"));
     assert!(r2.text.contains("<b>Meier</b>"));
     assert!(!r2.text.contains("bitten wir dich"));
