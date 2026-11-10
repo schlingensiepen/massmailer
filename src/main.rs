@@ -51,6 +51,9 @@ enum Command {
         /// Do not ask for confirmation
         #[arg(short, long)]
         yes: bool,
+        /// After sending, wait this many minutes and then fetch bounces (needs aws.* settings)
+        #[arg(long, value_name = "MINUTES")]
+        bounces_after: Option<f64>,
     },
     /// Fetch bounce, complaint and delivery events from the SQS queue and record them in the run folders
     Bounces {
@@ -116,7 +119,11 @@ fn real_main(cli: Cli) -> anyhow::Result<()> {
             limit,
             redirect_to,
             yes,
+            bounces_after,
         } => {
+            if let Some(m) = bounces_after {
+                overrides.push(("sending.bounces_after_minutes".into(), m.to_string()));
+            }
             if let Some(l) = limit {
                 overrides.push(("sending.limit".into(), l.to_string()));
             }
@@ -141,12 +148,61 @@ fn real_main(cli: Cli) -> anyhow::Result<()> {
     if let Command::Bounces { keep, wait, .. } = cli.command {
         return bounces::execute(&settings, &bounces::Options { keep, wait });
     }
-    run::execute(
+    let bounces_after = match mode {
+        Mode::Send => settings.num("sending.bounces_after_minutes")?,
+        _ => None,
+    };
+    if let Some(m) = bounces_after {
+        if !(0.0..=1440.0).contains(&m) {
+            anyhow::bail!("sending.bounces_after_minutes must be between 0 and 1440");
+        }
+        // fail before sending, not after the wait
+        bounces::check_settings(&settings)
+            .map_err(|e| anyhow::anyhow!("--bounces-after needs the bounces settings: {e:#}"))?;
+    }
+    let result = run::execute(
         &settings,
         &Options {
             mode,
             yes,
             verbose: cli.verbose,
         },
-    )
+    );
+    if let Some(m) = bounces_after {
+        // also after partly failed sends; nothing to wait for if sending was aborted early
+        if result.is_ok()
+            || result
+                .as_ref()
+                .is_err_and(|e| e.to_string().ends_with("mail(s) failed"))
+        {
+            wait_minutes(m);
+            bounces::execute(
+                &settings,
+                &bounces::Options {
+                    keep: false,
+                    wait: 5,
+                },
+            )?;
+        }
+    }
+    result
+}
+
+/// Waits, printing the remaining time once a minute (Ctrl-C ends the wait;
+/// the send is already logged completely at this point).
+fn wait_minutes(minutes: f64) {
+    let total = std::time::Duration::from_secs_f64(minutes * 60.0);
+    let start = std::time::Instant::now();
+    eprintln!("waiting {minutes} minute(s) before fetching bounces (Ctrl-C ends the wait)");
+    while let Some(rest) = total.checked_sub(start.elapsed()) {
+        if rest.is_zero() {
+            break;
+        }
+        let step = rest.min(std::time::Duration::from_secs(60));
+        std::thread::sleep(step);
+        let left = total.saturating_sub(start.elapsed()).as_secs();
+        if left > 0 {
+            eprintln!("  {}:{:02} left", left / 60, left % 60);
+        }
+    }
 }

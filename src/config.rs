@@ -24,6 +24,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "sending.redirect_to",
     "sending.limit",
     "sending.connections",
+    "sending.bounces_after_minutes",
     "run.state_dir",
     "sender.address",
     "sender.name",

@@ -520,6 +520,11 @@ impl Sqs {
     }
 }
 
+/// Checks that the settings `bounces` needs are present (no network).
+pub fn check_settings(s: &Settings) -> Result<()> {
+    Sqs::new(s).map(|_| ())
+}
+
 pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
     let state_dir = s
         .str("run.state_dir")
