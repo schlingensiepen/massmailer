@@ -23,6 +23,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     "sending.rate_per_second",
     "sending.redirect_to",
     "sending.limit",
+    "sending.connections",
     "run.state_dir",
     "sender.address",
     "sender.name",
@@ -56,6 +57,10 @@ pub const KNOWN_KEYS: &[&str] = &[
     "recipients.url.bearer_token",
     "fetch.timeout_seconds",
     "fetch.max_size_mb",
+    "aws.region",
+    "aws.sqs_queue_url",
+    "aws.access_key_id",
+    "aws.secret_access_key",
 ];
 
 /// Keys whose values are file paths (or URLs) and are resolved relative to
@@ -75,6 +80,8 @@ const SECRET_KEYS: &[&str] = &[
     "smtp.password",
     "smtp.username",
     "recipients.url.bearer_token",
+    "aws.access_key_id",
+    "aws.secret_access_key",
 ];
 
 pub fn is_secret(key: &str) -> bool {

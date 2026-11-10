@@ -8,6 +8,9 @@ repository = "https://github.com/schlingensiepen/massmailer"
 
 [dependencies]
 anyhow = "1.0.104"
+aws-credential-types = { version = "1.3.1", default-features = false }
+aws-sigv4 = { version = "1.6.5", default-features = false, features = ["sign-http", "http1"] }
+aws-smithy-runtime-api = { version = "1.21.0", default-features = false }
 calamine = "0.38.0"
 chrono = "0.4.45"
 clap = { version = "4.6.7", features = ["derive"] }
@@ -16,7 +19,7 @@ css-inline = { version = "0.23.1", default-features = false, features = ["styles
 csv = "1.4.0"
 html2text = "0.17.4"
 imagesize = "0.15.0"
-lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "hostname", "rustls-tls"] }
+lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "hostname", "rustls-tls", "pool"] }
 lol_html = "3.0.3"
 minijinja = "3.1.0"
 resvg = "0.49.0"

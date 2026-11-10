@@ -77,6 +77,8 @@ pub fn content_type_for(filename: &str) -> &'static str {
 pub struct Extra<'a> {
     pub configuration_set: Option<&'a str>,
     pub original_recipients: Option<&'a str>,
+    /// SES message tags (`name=value, …`), sent as `X-SES-MESSAGE-TAGS`
+    pub ses_tags: Option<&'a str>,
 }
 
 pub fn build(
@@ -112,6 +114,9 @@ pub fn build(
     }
     if let Some(cs) = extra.configuration_set {
         b = b.raw_header(raw("X-SES-CONFIGURATION-SET", cs));
+    }
+    if let Some(tags) = extra.ses_tags {
+        b = b.raw_header(raw("X-SES-MESSAGE-TAGS", tags));
     }
     if let Some(orig) = extra.original_recipients {
         b = b.raw_header(raw("X-Massmailer-Original-Recipients", orig));

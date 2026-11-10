@@ -1,12 +1,15 @@
 //! One run: run folder, recipients, rendering, sending (or dry run).
 
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use lettre::message::Mailbox;
+use lettre::transport::smtp::PoolConfig;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{SmtpTransport, Transport};
 use serde_json::json;
@@ -259,6 +262,11 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
         attachments: Vec<(String, String)>,
     }
     let mut prepared = Vec::new();
+    let configuration_set = s.str("ses.configuration_set");
+    let run_name = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let mut warnings_seen = std::collections::BTreeSet::new();
     for (line, row) in &rows {
         let ctx = || format!("recipient list line {line}");
@@ -328,14 +336,22 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
             }
         }
         let orig_header = redirect.as_ref().map(|_| original.join(", "));
+        // lets `bounces` match SES events to this run and mail (SES replaces the Message-ID)
+        let ses_tags = configuration_set.as_ref().map(|_| {
+            format!(
+                "massmailer-run={run_name}, massmailer-mail={:04}",
+                prepared.len() + 1
+            )
+        });
         let message = mail::build(
             &sender,
             &addr,
             &rendered,
             &atts,
             &Extra {
-                configuration_set: s.str("ses.configuration_set").as_deref(),
+                configuration_set: configuration_set.as_deref(),
                 original_recipients: orig_header.as_deref(),
+                ses_tags: ses_tags.as_deref(),
             },
         )
         .with_context(ctx)?;
@@ -392,6 +408,11 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
     }
 
     // sending (or dry run)
+    let connections = s
+        .num("sending.connections")?
+        .map(|n| n as usize)
+        .unwrap_or(3)
+        .clamp(1, 10);
     let transport = if opt.mode == Mode::Send {
         if !opt.yes && !confirm(&format!("Send {} mail(s) now?", prepared.len()))? {
             bail!("aborted, nothing sent");
@@ -416,6 +437,7 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
                 .timeout(Some(Duration::from_secs_f64(
                     s.num("smtp.timeout_seconds")?.unwrap_or(30.0),
                 )))
+                .pool_config(PoolConfig::new().max_size(connections as u32))
                 .build(),
         )
     } else {
@@ -429,31 +451,28 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
     let gap = Duration::from_secs_f64(1.0 / rate);
     let mut log = File::create(dir.join("log.jsonl"))?;
     let (mut ok, mut failed) = (0, 0);
-    for (i, p) in prepared.iter().enumerate() {
-        let started = Instant::now();
+    let total = prepared.len();
+    let dry = opt.mode == Mode::DryRun;
+    // writes the log line and progress of mail i (called in mail order)
+    let mut record = |i: usize, result: Result<String, String>| -> Result<()> {
+        let p = &prepared[i];
         let message_id = p
             .message
             .headers()
             .get_raw("Message-ID")
             .unwrap_or_default()
             .to_string();
-        let result = match &transport {
-            Some(t) => t
-                .send(&p.message)
-                .map(|r| r.message().collect::<Vec<_>>().join(" "))
-                .map_err(|e| e.to_string()),
-            None => Ok("dry run, not sent".to_string()),
-        };
-        let (status, detail) = match &result {
+        let (status, detail) = match result {
             Ok(m) => {
                 ok += 1;
-                ("sent", m.clone())
+                ("sent", m)
             }
             Err(e) => {
                 failed += 1;
-                ("failed", e.clone())
+                ("failed", e)
             }
         };
+        let status = if dry { "dry-run" } else { status };
         let entry = json!({
             "time": chrono::Local::now().to_rfc3339(),
             "mail": format!("mails/{:04}.eml", i + 1),
@@ -462,26 +481,78 @@ pub fn execute(s: &Settings, opt: &Options) -> Result<()> {
             "message_id": message_id,
             "bytes": p.bytes,
             "attachments": p.attachments.iter().map(|(f, h)| json!({"file": f, "sha256": h})).collect::<Vec<_>>(),
-            "status": if opt.mode == Mode::DryRun { "dry-run" } else { status },
+            "status": status,
             "detail": detail,
         });
         writeln!(log, "{entry}")?;
-        eprintln!(
-            "{:>4}/{} {} {}",
-            i + 1,
-            prepared.len(),
-            if opt.mode == Mode::DryRun {
-                "dry-run"
-            } else {
-                status
-            },
-            p.to
-        );
-        if transport.is_some()
-            && i + 1 < prepared.len()
-            && let Some(rest) = gap.checked_sub(started.elapsed())
-        {
-            std::thread::sleep(rest);
+        eprintln!("{:>4}/{total} {status} {}", i + 1, p.to);
+        Ok(())
+    };
+    match &transport {
+        None => {
+            for i in 0..total {
+                record(i, Ok("dry run, not sent".to_string()))?;
+            }
+        }
+        Some(t) => {
+            // A dispatcher releases one mail per `gap`; `connections` workers
+            // send over pooled SMTP connections; results are logged in order.
+            let (job_tx, job_rx) = mpsc::sync_channel::<usize>(0);
+            let job_rx = Mutex::new(job_rx);
+            let (res_tx, res_rx) = mpsc::channel::<(usize, Result<String, String>)>();
+            let prepared = &prepared;
+            let mut write_error = None;
+            std::thread::scope(|sc| {
+                for _ in 0..connections.min(total.max(1)) {
+                    let res_tx = res_tx.clone();
+                    let job_rx = &job_rx;
+                    sc.spawn(move || {
+                        loop {
+                            let next = job_rx.lock().map(|rx| rx.recv());
+                            let Ok(Ok(i)) = next else { break };
+                            let r = t
+                                .send(&prepared[i].message)
+                                .map(|r| r.message().collect::<Vec<_>>().join(" "))
+                                .map_err(|e| e.to_string());
+                            if res_tx.send((i, r)).is_err() {
+                                break;
+                            }
+                        }
+                    });
+                }
+                drop(res_tx);
+                sc.spawn(move || {
+                    let mut last: Option<Instant> = None;
+                    for i in 0..total {
+                        if let Some(l) = last
+                            && let Some(rest) = gap.checked_sub(l.elapsed())
+                        {
+                            std::thread::sleep(rest);
+                        }
+                        // blocks until a worker is free
+                        if job_tx.send(i).is_err() {
+                            break;
+                        }
+                        last = Some(Instant::now());
+                    }
+                });
+                let mut pending = BTreeMap::new();
+                let mut next = 0;
+                for (i, r) in res_rx {
+                    pending.insert(i, r);
+                    while let Some(r) = pending.remove(&next) {
+                        if write_error.is_none()
+                            && let Err(e) = record(next, r)
+                        {
+                            write_error = Some(e);
+                        }
+                        next += 1;
+                    }
+                }
+            });
+            if let Some(e) = write_error {
+                return Err(e);
+            }
         }
     }
     eprintln!(

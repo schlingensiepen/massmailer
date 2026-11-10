@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use massmailer::bounces;
 use massmailer::config::{Settings, parse_set};
 use massmailer::run::{self, Mode, Options};
 
@@ -51,6 +52,21 @@ enum Command {
         #[arg(short, long)]
         yes: bool,
     },
+    /// Fetch bounce, complaint and delivery events from the SQS queue and record them in the run folders
+    Bounces {
+        /// Leave the messages in the queue (for testing)
+        #[arg(long)]
+        keep: bool,
+        /// Long-poll seconds per request (0-20)
+        #[arg(long, default_value_t = 5)]
+        wait: u32,
+        /// AWS access key id (or MASSMAILER_AWS_ACCESS_KEY_ID)
+        #[arg(long)]
+        aws_access_key_id: Option<String>,
+        /// AWS secret access key (or MASSMAILER_AWS_SECRET_ACCESS_KEY)
+        #[arg(long)]
+        aws_secret_access_key: Option<String>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -76,7 +92,22 @@ fn real_main(cli: Cli) -> anyhow::Result<()> {
     if let Some(p) = cli.smtp_password {
         overrides.push(("smtp.password".into(), p));
     }
+    if let Command::Bounces {
+        aws_access_key_id: Some(k),
+        ..
+    } = &cli.command
+    {
+        overrides.push(("aws.access_key_id".into(), k.clone()));
+    }
+    if let Command::Bounces {
+        aws_secret_access_key: Some(k),
+        ..
+    } = &cli.command
+    {
+        overrides.push(("aws.secret_access_key".into(), k.clone()));
+    }
     let (mode, yes) = match &cli.command {
+        Command::Bounces { .. } => (Mode::Check, false),
         Command::Check => (Mode::Check, false),
         Command::Columns => (Mode::Check, false),
         Command::Render => (Mode::Render, false),
@@ -101,6 +132,9 @@ fn real_main(cli: Cli) -> anyhow::Result<()> {
     let settings = Settings::load(&cli.configs, &overrides)?;
     if let Command::Columns = cli.command {
         return run::columns(&settings);
+    }
+    if let Command::Bounces { keep, wait, .. } = cli.command {
+        return bounces::execute(&settings, &bounces::Options { keep, wait });
     }
     run::execute(
         &settings,

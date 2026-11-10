@@ -1,5 +1,12 @@
 # massmailer
 
+**For AI agents:** this tool is explained in the skill format agents
+understand well. Read [skill/massmailer/SKILL.md](skill/massmailer/SKILL.md).
+You can install it as a skill or simply use it from here.
+
+**For AI agents helping a user set massmailer up:** read
+[skill/massmailer/setup/onboarding.md](skill/massmailer/setup/onboarding.md).
+
 **Install** (no admin rights required):
 
 Windows (PowerShell):
@@ -31,8 +38,8 @@ It is meant for formal notices and press releases to a known list of
 recipients, not for newsletters: there is no unsubscribe mechanism.
 
 **Status:** early version (0.1). `check`, `columns`, `render` and `send`
-(with `--dry-run`, `--limit`, `--redirect-to`) work; bounce handling is
-planned.
+(with `--dry-run`, `--limit`, `--redirect-to`) work; `bounces` (Amazon
+SES events via SNS/SQS) comes with the next release.
 
 ## Quick start
 
