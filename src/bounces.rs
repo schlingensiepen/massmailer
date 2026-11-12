@@ -250,16 +250,18 @@ fn load_runs(state_dir: &Path) -> Result<Vec<Run>> {
 }
 
 /// Run index and mail for one recipient of an event: the run named in the
-/// SES tags, otherwise the newest run that sent to the address.
+/// SES tags, otherwise (untagged events only) the newest run that sent to
+/// the address. A tag naming a run that is not in this state_dir means the
+/// event belongs to another state_dir, so there is no match, even if a run
+/// here sent to the same address.
 fn find<'a>(runs: &'a [Run], ev: &Event, address: &str) -> Option<(usize, Option<&'a Sent>)> {
     let addr = address.to_lowercase();
-    if let Some(name) = ev.tags.get("massmailer-run")
-        && let Some(i) = runs.iter().position(|r| {
+    if let Some(name) = ev.tags.get("massmailer-run") {
+        let i = runs.iter().position(|r| {
             r.dir
                 .file_name()
                 .is_some_and(|n| n.to_string_lossy() == *name)
-        })
-    {
+        })?;
         let r = &runs[i];
         let sent = ev
             .tags
@@ -726,6 +728,12 @@ mod tests {
             .insert("massmailer-run".into(), "20261101-100000-send".into());
         let (i, _) = find(&runs, &ev, "anna@example.org").unwrap();
         assert!(runs[i].dir.ends_with("20261101-100000-send"));
+        // a tag naming a run of another state_dir does not fall back to the address
+        let mut other = ev.clone();
+        other
+            .tags
+            .insert("massmailer-run".into(), "20261112-170457-send".into());
+        assert!(find(&runs, &other, "anna@example.org").is_none());
         // record writes CSV into the run
         record(&base, &runs, &ev, "id-1").unwrap();
         let csv = fs::read_to_string(base.join("20261101-100000-send/bounces.csv")).unwrap();

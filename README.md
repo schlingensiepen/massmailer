@@ -113,8 +113,10 @@ their CSS with `<link rel="stylesheet">` or `<style>`; it is inlined.
   events for the configuration set.
 - SES replaces the `Message-ID` header with its own. `bounces` matches
   events by the message tags massmailer sets (`X-SES-MESSAGE-TAGS:
-  massmailer-run=…, massmailer-mail=…`), falling back to the recipient
-  address; the `message_id` in `log.jsonl` is not what SES delivers.
+  massmailer-run=…, massmailer-mail=…`); only events without these tags
+  fall back to the recipient address. An event tagged with a run that is
+  not in `run.state_dir` belongs to another state dir and stays in the
+  queue. The `message_id` in `log.jsonl` is not what SES delivers.
 - Keep `sending.rate_per_second` well below the account's maximum send
   rate.
 
