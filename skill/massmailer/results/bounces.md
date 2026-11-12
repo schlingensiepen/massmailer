@@ -26,6 +26,9 @@ massmailer bounces -c account.json -c ~/mailings-secrets/aws.json --wait 20   # 
   mailings with different state dirs can share one queue; the summary
   says `N event(s) of runs not in this run.state_dir left in the
   queue`. Simplest setup: one common `run.state_dir` for all mailings.
+  An event counts as foreign when its `massmailer-run` tag names a run
+  that is not in this state dir, even if a run here sent to the same
+  address (0.2.2; 0.2.1 wrongly claimed it by address).
 - `send --bounces-before` / `--bounces-after N` / `--purge-bounces`
   call this from a send (`../modes/send.md`).
 - `--wait N`: long-poll seconds per receive call, 1–20, default 5.

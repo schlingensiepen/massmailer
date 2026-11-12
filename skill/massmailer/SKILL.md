@@ -8,11 +8,13 @@ description: Send personalised bulk email (formal notices, invitations, press re
 `massmailer` is a command-line tool: one body file (Markdown, HTML or
 plain text) with placeholders + one recipient list = one mail per row,
 wrapped in a letterhead, sent via SMTP at a limited rate and recorded in
-a run folder. This skill matches massmailer **0.2.1** (`massmailer
+a run folder. This skill matches massmailer **0.2.2** (`massmailer
 --version`); the `bounces` command, the `X-SES-MESSAGE-TAGS` header and
 parallel SMTP connections (`sending.connections`) exist from 0.2.0 on,
 `send --bounces-before/--bounces-after/--purge-bounces` and
 `bounces --purge` from 0.2.1.
+0.2.2 fixes the matching: an event tagged with a run of another state
+dir is no longer claimed by address.
 
 ## When to use, when not
 
